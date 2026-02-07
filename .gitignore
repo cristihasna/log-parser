@@ -1,0 +1,3 @@
+.wwebjs_*
+logs*.txt
+node_modules
