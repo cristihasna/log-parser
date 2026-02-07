@@ -1,4 +1,4 @@
-import { ParsedEventJSON, DaySummary, FeedingSession, NapSession, EventType } from './types';
+import { ParsedEvent, DaySummary, FeedingSession, NapSession, EventType, Comment } from './types';
 
 // Night hours: 20:00 to 07:00
 const NIGHT_START_HOUR = 20;
@@ -70,20 +70,20 @@ function getSessionDate(startTime: Date): string {
 }
 
 interface SessionMatch {
-  start: ParsedEventJSON;
-  end: ParsedEventJSON | null;
+  start: ParsedEvent;
+  end: ParsedEvent | null;
 }
 
 /**
- * Match START and END events to create complete sessions
+ * Match START and STOP events to create complete sessions
  */
 function matchSessions(
-  events: ParsedEventJSON[],
+  events: ParsedEvent[],
   startType: EventType,
   endType: EventType
 ): SessionMatch[] {
   const sessions: SessionMatch[] = [];
-  let currentStart: ParsedEventJSON | null = null;
+  let currentStart: ParsedEvent | null = null;
 
   for (const event of events) {
     if (event.type === startType) {
@@ -109,8 +109,8 @@ function matchSessions(
 /**
  * Group events by date
  */
-function groupEventsByDate(events: ParsedEventJSON[]): Map<string, ParsedEventJSON[]> {
-  const grouped = new Map<string, ParsedEventJSON[]>();
+function groupEventsByDate(events: ParsedEvent[]): Map<string, ParsedEvent[]> {
+  const grouped = new Map<string, ParsedEvent[]>();
   
   for (const event of events) {
     const date = getDateString(parseTimestamp(event.timestamp));
@@ -127,7 +127,7 @@ function groupEventsByDate(events: ParsedEventJSON[]): Map<string, ParsedEventJS
  * Count wake-ups during night time
  * A wake-up is when STOP_SLEEP occurs during night hours
  */
-function countNightWakeUps(events: ParsedEventJSON[], dateStr: string): number {
+function countNightWakeUps(events: ParsedEvent[], dateStr: string): number {
   let count = 0;
   
   for (const event of events) {
@@ -150,14 +150,14 @@ function countNightWakeUps(events: ParsedEventJSON[], dateStr: string): number {
 /**
  * Aggregate parsed events into daily summaries
  */
-export function aggregateByDay(events: ParsedEventJSON[]): DaySummary[] {
+export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
   // Sort events by timestamp
   const sortedEvents = [...events].sort((a, b) => 
     parseTimestamp(a.timestamp).getTime() - parseTimestamp(b.timestamp).getTime()
   );
 
   // Match feeding sessions
-  const feedingSessions = matchSessions(sortedEvents, 'START_FEED', 'END_FEED');
+  const feedingSessions = matchSessions(sortedEvents, 'START_FEED', 'STOP_FEED');
   
   // Match sleep sessions
   const sleepSessions = matchSessions(sortedEvents, 'START_SLEEP', 'STOP_SLEEP');
@@ -193,6 +193,7 @@ export function aggregateByDay(events: ParsedEventJSON[]): DaySummary[] {
       totalFeedingTime: 0,
       wetDiaperChanges: 0,
       dirtyDiaperChanges: 0,
+      mixedDiaperChanges: 0,
       totalNightSleepTime: 0,
       totalDaySleepTime: 0,
       napSessions: 0,
@@ -202,6 +203,7 @@ export function aggregateByDay(events: ParsedEventJSON[]): DaySummary[] {
       totalNightWakeUps: 0,
       feedings: [],
       naps: [],
+      comments: [],
     };
 
     // Process feeding sessions for this date
@@ -279,13 +281,17 @@ export function aggregateByDay(events: ParsedEventJSON[]): DaySummary[] {
 
     // Count diaper changes
     for (const event of dayEvents) {
-      if (event.type === 'WET_DIAPER_CHANGE') {
-        summary.wetDiaperChanges++;
-      } else if (event.type === 'DIRTY_DIAPER_CHANGE') {
-        summary.dirtyDiaperChanges++;
-      } else if (event.type === 'DIAPER_CHANGE') {
-        // Generic diaper change - count as both wet and dirty since we don't know
-        summary.wetDiaperChanges++;
+      if (event.type === 'DIAPER_CHANGE') {
+        if (event.diaperChangeType === 'WET') {
+          summary.wetDiaperChanges++;
+        } else if (event.diaperChangeType === 'DIRTY') {
+          summary.dirtyDiaperChanges++;
+        } else if (event.diaperChangeType === 'WET_AND_DIRTY') {
+          summary.mixedDiaperChanges++;
+        } else {
+          // Unknown type - count as wet by default
+          summary.wetDiaperChanges++;
+        }
       }
     }
 
@@ -296,6 +302,17 @@ export function aggregateByDay(events: ParsedEventJSON[]): DaySummary[] {
     for (const event of dayEvents) {
       if (event.type === 'WEIGHT' && event.weight) {
         summary.weight = event.weight;
+      }
+    }
+
+    // Collect comments
+    for (const event of dayEvents) {
+      if (event.type === 'COMMENT') {
+        const eventDate = parseTimestamp(event.timestamp);
+        summary.comments.push({
+          time: formatTime(eventDate),
+          message: event.rawMessage,
+        });
       }
     }
 

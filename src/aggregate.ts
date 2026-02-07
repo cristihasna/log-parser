@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { aggregateByDay } from './aggregator';
-import { ParsedEventJSON } from './types';
+import { ParsedEvent } from './types';
 
 function printUsage(): void {
   console.log(`
@@ -68,7 +68,7 @@ function main(): void {
 
   // Read and parse the JSON file
   const content = fs.readFileSync(resolvedInputPath, 'utf-8');
-  const events: ParsedEventJSON[] = JSON.parse(content);
+  const events: ParsedEvent[] = JSON.parse(content);
 
   console.error(`Loaded ${events.length} events from ${inputFile}`);
 

@@ -1,3 +1,6 @@
 .wwebjs_*
-logs*.txt
+logs
+parsed
+aggregated
 node_modules
+.env
