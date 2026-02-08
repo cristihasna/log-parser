@@ -3,23 +3,28 @@ import * as path from 'path';
 import { aggregateByDay } from './aggregator';
 import { ParsedEvent } from './types';
 
+const DEFAULT_INPUT_DIR = './parsed';
+const DEFAULT_OUTPUT_DIR = './aggregated';
+
 function printUsage(): void {
   console.log(`
-Usage: npx ts-node src/aggregate.ts <input-json-file> [options]
+Usage: npx ts-node src/aggregate.ts [input-file] [options]
 
 Options:
-  --output, -o    Output file path (default: stdout)
+  --input, -i     Input JSON file with parsed events (default: parsed/parsed.json)
+  --output, -o    Output file path (default: aggregated/aggregated.json)
   --help, -h      Show this help message
 
 Examples:
+  npx ts-node src/aggregate.ts
   npx ts-node src/aggregate.ts parsed.json
-  npx ts-node src/aggregate.ts parsed.json --output daily-summary.json
+  npx ts-node src/aggregate.ts -i parsed/parsed_week5.json -o aggregated/week5.json
 `);
 }
 
-function parseArgs(args: string[]): { inputFile: string; outputFile?: string } {
-  let inputFile = '';
-  let outputFile: string | undefined;
+function parseArgs(args: string[]): { inputFile: string; outputFile: string } {
+  let inputFile = path.join(DEFAULT_INPUT_DIR, 'parsed.json');
+  let outputFile = path.join(DEFAULT_OUTPUT_DIR, 'aggregated.json');
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -29,20 +34,20 @@ function parseArgs(args: string[]): { inputFile: string; outputFile?: string } {
       process.exit(0);
     }
 
+    if (arg === '--input' || arg === '-i') {
+      inputFile = args[++i];
+      continue;
+    }
+
     if (arg === '--output' || arg === '-o') {
       outputFile = args[++i];
       continue;
     }
 
+    // Positional argument: treat as input file
     if (!arg.startsWith('-')) {
       inputFile = arg;
     }
-  }
-
-  if (!inputFile) {
-    console.error('Error: No input file specified');
-    printUsage();
-    process.exit(1);
   }
 
   return { inputFile, outputFile };
@@ -50,12 +55,6 @@ function parseArgs(args: string[]): { inputFile: string; outputFile?: string } {
 
 function main(): void {
   const args = process.argv.slice(2);
-  
-  if (args.length === 0) {
-    printUsage();
-    process.exit(1);
-  }
-
   const { inputFile, outputFile } = parseArgs(args);
 
   // Resolve input file path
@@ -81,13 +80,11 @@ function main(): void {
   const output = JSON.stringify(dailySummaries, null, 2);
 
   // Write output
-  if (outputFile) {
-    const resolvedOutputPath = path.resolve(outputFile);
-    fs.writeFileSync(resolvedOutputPath, output, 'utf-8');
-    console.error(`Output written to ${resolvedOutputPath}`);
-  } else {
-    console.log(output);
-  }
+  const resolvedOutputPath = path.resolve(outputFile);
+  const outputDir = path.dirname(resolvedOutputPath);
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(resolvedOutputPath, output, 'utf-8');
+  console.error(`Output written to ${resolvedOutputPath}`);
 }
 
 main();
