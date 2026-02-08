@@ -88,6 +88,7 @@ async function main(): Promise<void> {
   const outputDir = process.env.WHATSAPP_OUTPUT_DIR || DEFAULT_OUTPUT_DIR;
   const headlessEnv = process.env.WHATSAPP_HEADLESS;
   const headless = headlessEnv === '0' ? false : true;
+  const chromePath = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
 
   const week1Start = firstMondayAfter(birthdate);
   const weekStart = week1Start.add(weekNumber - 1, 'week').startOf('day');
@@ -101,13 +102,20 @@ async function main(): Promise<void> {
   console.error(`Week ${weekNumber}: ${weekStart.format('YYYY-MM-DD')} → ${weekEnd.format('YYYY-MM-DD')}`);
   console.error(`Window: ${continuityStart.format('YYYY-MM-DD HH:mm')} → ${windowEnd.format('YYYY-MM-DD HH:mm')}`);
 
+  const puppeteerOptions: Record<string, unknown> = {
+    headless,
+    protocolTimeout: 60 * 1000 * 10, // 10 minutes
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+  };
+
+  if (chromePath) {
+    console.error(`Using custom Chrome path: ${chromePath}`);
+    puppeteerOptions.executablePath = chromePath;
+  }
+
   const client = new Client({
     authStrategy: new LocalAuth({ dataPath: authDir, clientId: CLIENT_ID }),
-    puppeteer: {
-      headless,
-      protocolTimeout: 60 * 1000 * 10, // 10 minutes
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    },
+    puppeteer: puppeteerOptions,
   });
 
   client.on('qr', (qr: string) => {
