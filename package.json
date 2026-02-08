@@ -4,8 +4,10 @@
   "description": "Parser for newborn care logs in Romanian",
   "scripts": {
     "fetch": "tsx src/fetch-logs.ts",
+    "fetch:daily": "tsx src/fetch-date.ts",
     "parse": "tsx src/parse.ts",
     "aggregate": "tsx src/aggregate.ts",
+    "process:daily": "tsx src/process-date.ts",
     "run": "npm run parse && npm run aggregate && npm run serve"
   },
   "keywords": [],

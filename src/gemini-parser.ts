@@ -2,6 +2,31 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ParsedEvent } from './types';
 import { PARSING_PROMPT } from './prompt';
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getBackoffDelayMs(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  const exponential = baseDelayMs * Math.pow(2, attempt - 1);
+  const jitter = Math.floor(Math.random() * 250);
+  return Math.min(exponential + jitter, maxDelayMs);
+}
+
+function isRetryableGeminiError(error: unknown): boolean {
+  const err = error as { message?: string; status?: number; response?: { status?: number } };
+  const status = err?.status ?? err?.response?.status;
+  if (status === 429 || status === 503) return true;
+
+  const message = (err?.message || '').toLowerCase();
+  return (
+    message.includes('too many requests') ||
+    message.includes('rate limit') ||
+    message.includes('resource_exhausted') ||
+    message.includes('service busy') ||
+    message.includes('unavailable')
+  );
+}
+
 /**
  * Parse log file content using Gemini API
  */
@@ -29,10 +54,31 @@ ${logContent}
 \`\`\``;
 
   console.error('Sending request to Gemini API...');
-  
-  const result = await model.generateContent(fullPrompt);
-  const response = result.response;
-  const text = response.text();
+
+  const maxAttempts = 5;
+  const baseDelayMs = 1000;
+  const maxDelayMs = 20000;
+
+  let text = '';
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const result = await model.generateContent(fullPrompt);
+      const response = result.response;
+      text = response.text();
+      break;
+    } catch (error: unknown) {
+      const shouldRetry = isRetryableGeminiError(error);
+      if (!shouldRetry || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delay = getBackoffDelayMs(attempt, baseDelayMs, maxDelayMs);
+      console.error(
+        `Gemini request failed (attempt ${attempt}/${maxAttempts}). Retrying in ${Math.round(delay / 1000)}s...`,
+      );
+      await sleep(delay);
+    }
+  }
 
   // Parse the JSON response
   let events: ParsedEvent[];

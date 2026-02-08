@@ -82,6 +82,20 @@ export interface ParsedEventJSON {
 
 ## Critical Parsing Rules
 
+### 0. Next-Day Event Handling
+
+**IMPORTANT**: The logs may include messages from the next day to capture sessions that cross midnight.
+
+**For messages from the NEXT day** (after 00:00 of the day following the target date):
+- **ONLY create STOP_SLEEP or STOP_FEED events** that close sessions started on the target day
+- **DO NOT create START_SLEEP or START_FEED events** for the next day
+- **DO NOT create standalone events** (DIAPER_CHANGE, WEIGHT, COMMENT) for the next day
+
+**Example**: When processing 2026-01-20:
+- Message at `2026-01-20 23:00 - "Start somn"` → Create START_SLEEP
+- Message at `2026-01-21 05:30 - "Trezit"` → Create STOP_SLEEP (closes the 23:00 session)
+- Message at `2026-01-21 06:00 - "Schimbat pipi"` → DO NOT create event (belongs to next day)
+
 ### 1. Timestamp Extraction
 - **Always use the time mentioned in the message content**, combined with the date from the message timestamp
 - **Handle midnight crossings intelligently**: If the content time (e.g., 23:50) is before midnight but the message was posted after midnight (e.g., 13/01/2026, 00:09), use the previous day's date
@@ -99,8 +113,9 @@ export interface ParsedEventJSON {
 - "start somn", "inceput somn", "start somnic"
 - "incercam somn", "tentativa de dormit", "tentativa somnic", "tentativa start somnic"
 - "somn [time]" without explicit "stop" or "trezit"
-- "continuam somn", "continuat somnic" (resuming after interruption)
+- "continuam somn", "continuat somn", "continuat somnic" (resuming sleep after interruption)
 - "dormit [time1] - [time2]" creates START_SLEEP at time1
+- **Context-aware**: If previous event was STOP_SLEEP and message says "Continuat somnul", it means START_SLEEP
 
 **STOP_SLEEP**: Triggered by:
 - "stop somn", "stop somnic"
@@ -111,8 +126,9 @@ export interface ParsedEventJSON {
 
 **START_FEED**: Triggered by:
 - "start papa", "start papica", "inceput papa"
-- "continuam papa", "continuam papica", "continuat papa" (resuming after interruption)
+- "continuam papa", "continuam papica", "continuat papa", "continuat papica" (resuming feeding after interruption)
 - "papa [time1] - [time2]" creates START_FEED at time1
+- **Context-aware**: If previous event was STOP_FEED and message says "Continuat papa", it means START_FEED
 
 **STOP_FEED**: Triggered by:
 - "stop papa", "stop papica"
