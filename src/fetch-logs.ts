@@ -10,6 +10,9 @@ const DEFAULT_FETCH_LIMIT = 500;
 const DEFAULT_AUTH_DIR = '.wwebjs_auth';
 const DEFAULT_OUTPUT_DIR = './logs';
 const CLIENT_ID = 'log-parser';
+const DEFAULT_SYNC_DELAY_SECONDS = 30;
+const DEFAULT_FETCH_RETRIES = 3;
+const DEFAULT_RETRY_DELAY_SECONDS = 10;
 const CONTINUITY_START_HOUR = 20; // Sunday evening
 const CONTINUITY_END_HOUR = 7; // Monday morning
 const BIRTHDATE = '2025-11-16T10:00:00Z';
@@ -20,6 +23,21 @@ function getEnvNumber(name: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = parseInt(raw, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sleep(seconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
+}
+
+async function waitForSync(seconds: number): Promise<void> {
+  console.info(`Waiting ${seconds}s for chat history to sync...`);
+  for (let i = seconds; i > 0; i -= 10) {
+    if (i % 10 === 0) {
+      console.info(`  ${i}s remaining...`);
+    }
+    await sleep(10);
+  }
+  console.info('Sync wait complete.');
 }
 
 function formatLogPrefix(date: Dayjs): string {
@@ -90,6 +108,9 @@ async function main(): Promise<void> {
   const headlessEnv = process.env.WHATSAPP_HEADLESS;
   const headless = headlessEnv === '0' ? false : true;
   const chromePath = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+  const syncDelay = getEnvNumber('SYNC_DELAY_SECONDS', DEFAULT_SYNC_DELAY_SECONDS);
+  const fetchRetries = getEnvNumber('FETCH_RETRIES', DEFAULT_FETCH_RETRIES);
+  const retryDelay = getEnvNumber('RETRY_DELAY_SECONDS', DEFAULT_RETRY_DELAY_SECONDS);
 
   const week1Start = firstMondayAfter(birthdate);
   const weekStart = week1Start.add(weekNumber - 1, 'week').startOf('day');
@@ -135,6 +156,10 @@ async function main(): Promise<void> {
   client.on('ready', async () => {
     try {
       console.info('Client is ready.');
+      console.info('Ensuring chat history is synced before fetching messages...');
+      // Wait for chat history to sync
+      await waitForSync(syncDelay);
+      console.info('Wait complete.');
       const chats = await client.getChats();
       const groupChat = await findGroupChat(chats, groupName);
 
@@ -151,8 +176,12 @@ async function main(): Promise<void> {
 
       console.info(`Found group "${groupName}", fetching messages...`);
 
-      const messages = await groupChat.fetchMessages({ limit: DEFAULT_FETCH_LIMIT });
-      const filtered = messages.filter((msg) => {
+      // Retry fetching messages until we get enough or run out of retries
+      let messages: Message[] = [];
+      let filtered: Message[] = [];
+
+      messages = await groupChat.fetchMessages({ limit: DEFAULT_FETCH_LIMIT });
+      filtered = messages.filter((msg) => {
         if (msg.type !== 'chat') return false;
         if (!msg.body || !msg.body.trim()) return false;
         const msgDate = dayjs.unix(msg.timestamp);
