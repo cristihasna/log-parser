@@ -2,8 +2,11 @@ import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import dayjs, { Dayjs } from 'dayjs';
+import timezone from 'dayjs/plugin/timezone';
 import { Client, LocalAuth, Message, Chat } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
+
+dayjs.extend(timezone);
 
 const DEFAULT_FETCH_LIMIT = 500;
 const DEFAULT_AUTH_DIR = '.wwebjs_auth';
@@ -13,9 +16,21 @@ const DEFAULT_SYNC_DELAY_SECONDS = 30;
 const DEFAULT_FETCH_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_SECONDS = 10;
 const WHATSAPP_GROUP_NAME = 'Baby log';
+const DEFAULT_TIMEZONE = 'Europe/Bucharest'; // Change if needed
 
 // Overlap window to capture sessions that cross into next day
 const OVERLAP_HOURS_AFTER = 8; // End fetching at 08:00 next day (covers long sleep sessions)
+
+const GROUP_NAME = process.env.WHATSAPP_GROUP_NAME || WHATSAPP_GROUP_NAME;
+
+const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || DEFAULT_AUTH_DIR;
+const OUTPUT_DIR = process.env.WHATSAPP_OUTPUT_DIR || DEFAULT_OUTPUT_DIR;
+const HEADLESS_ENV = process.env.WHATSAPP_HEADLESS;
+const CHROME_PATH = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
+const SYNC_DELAY = getEnvNumber('SYNC_DELAY_SECONDS', DEFAULT_SYNC_DELAY_SECONDS);
+const FETCH_RETRIES = getEnvNumber('FETCH_RETRIES', DEFAULT_FETCH_RETRIES);
+const RETRY_DELAY = getEnvNumber('RETRY_DELAY_SECONDS', DEFAULT_RETRY_DELAY_SECONDS);
+const TIMEZONE = process.env.TIMEZONE || DEFAULT_TIMEZONE;
 
 function getEnvNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -31,7 +46,7 @@ function sleep(seconds: number): Promise<void> {
 async function waitForSync(seconds: number): Promise<void> {
   console.info(`Waiting ${seconds}s for chat history to sync...`);
   for (let i = seconds; i > 0; i--) {
-    if (i % 10 === 0 || i <= 5) {
+    if (i % 10 === 0) {
       console.info(`  ${i}s remaining...`);
     }
     await sleep(1);
@@ -39,25 +54,11 @@ async function waitForSync(seconds: number): Promise<void> {
   console.info('Sync wait complete.');
 }
 
-function formatLogPrefix(date: Dayjs): string {
-  return date.format('DD/MM/YYYY, HH:mm');
-}
+function formatMessageLine(message: Message): string[] {
+  const sender = message.author || 'Unknown Sender';
 
-async function findGroupChat(chats: Chat[], groupName: string): Promise<Chat | null> {
-  for (const chat of chats) {
-    if (chat.isGroup && chat.name === groupName) {
-      return chat;
-    }
-  }
-  return null;
-}
-
-async function formatMessageLine(message: Message): Promise<string[]> {
-  const contact = await message.getContact();
-  const sender = contact.pushname || contact.name || contact.number || 'Unknown';
-
-  const timestamp = dayjs.unix(message.timestamp);
-  const prefix = `${formatLogPrefix(timestamp)} - ${sender}: `;
+  const timestamp = dayjs.unix(message.timestamp).tz(TIMEZONE);
+  const prefix = `${timestamp.format('DD/MM/YYYY, HH:mm')} - ${sender}: `;
   const body = message.body || '';
 
   const lines = body.split(/\r?\n/);
@@ -92,40 +93,31 @@ function parseDateArg(args: string[]): Dayjs {
 
 async function main(): Promise<void> {
   const targetDate = parseDateArg(process.argv.slice(2));
-  const groupName = process.env.WHATSAPP_GROUP_NAME || WHATSAPP_GROUP_NAME;
-
-  const authDir = process.env.WHATSAPP_AUTH_DIR || DEFAULT_AUTH_DIR;
-  const outputDir = process.env.WHATSAPP_OUTPUT_DIR || DEFAULT_OUTPUT_DIR;
-  const headlessEnv = process.env.WHATSAPP_HEADLESS;
-  const headless = headlessEnv === '0' ? false : true;
-  const chromePath = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
-  const syncDelay = getEnvNumber('SYNC_DELAY_SECONDS', DEFAULT_SYNC_DELAY_SECONDS);
-  const fetchRetries = getEnvNumber('FETCH_RETRIES', DEFAULT_FETCH_RETRIES);
-  const retryDelay = getEnvNumber('RETRY_DELAY_SECONDS', DEFAULT_RETRY_DELAY_SECONDS);
-
   // Define fetch window: start at midnight of target date, end with overlap into next day
   const windowStart = targetDate.startOf('day');
   const windowEnd = targetDate.add(1, 'day').add(OVERLAP_HOURS_AFTER, 'hour').startOf('hour');
   const now = dayjs();
   const effectiveEnd = windowEnd.isAfter(now) ? now : windowEnd;
 
-  console.error(`Fetching messages for group "${groupName}"`);
+  console.error(`Fetching messages for group "${GROUP_NAME}"`);
   console.error(`Target date: ${targetDate.format('YYYY-MM-DD')}`);
-  console.error(`Window (with overlap): ${windowStart.format('YYYY-MM-DD HH:mm')} → ${effectiveEnd.format('YYYY-MM-DD HH:mm')}`);
+  console.error(
+    `Window (with overlap): ${windowStart.format('YYYY-MM-DD HH:mm')} → ${effectiveEnd.format('YYYY-MM-DD HH:mm')}`,
+  );
 
   const puppeteerOptions: Record<string, unknown> = {
-    headless,
+    headless: HEADLESS_ENV !== '0',
     protocolTimeout: 60 * 1000 * 10, // 10 minutes
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
   };
 
-  if (chromePath) {
-    console.error(`Using custom Chrome path: ${chromePath}`);
-    puppeteerOptions.executablePath = chromePath;
+  if (CHROME_PATH) {
+    console.error(`Using custom Chrome path: ${CHROME_PATH}`);
+    puppeteerOptions.executablePath = CHROME_PATH;
   }
 
   const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: authDir, clientId: CLIENT_ID }),
+    authStrategy: new LocalAuth({ dataPath: AUTH_DIR, clientId: CLIENT_ID }),
     puppeteer: puppeteerOptions,
   });
 
@@ -147,14 +139,14 @@ async function main(): Promise<void> {
       console.info('Client is ready.');
 
       // Wait for chat history to sync
-      await waitForSync(syncDelay);
+      await waitForSync(SYNC_DELAY);
 
       const chats = await client.getChats();
-      const groupChat = await findGroupChat(chats, groupName);
+      const groupChat = chats.find((chat) => chat.isGroup && chat.name === GROUP_NAME);
 
       if (!groupChat) {
         const groupNames = chats.filter((chat) => chat.isGroup).map((chat) => chat.name);
-        console.error(`Group "${groupName}" not found.`);
+        console.error(`Group "${GROUP_NAME}" not found.`);
         console.warn('Available groups:');
         for (const name of groupNames) {
           console.log(`- ${name}`);
@@ -163,14 +155,14 @@ async function main(): Promise<void> {
         process.exit(1);
       }
 
-      console.info(`Found group "${groupName}", fetching messages...`);
+      console.info(`Found group "${GROUP_NAME}", fetching messages...`);
 
       // Retry fetching messages until we get enough or run out of retries
       let messages: Message[] = [];
       let filtered: Message[] = [];
 
-      for (let attempt = 1; attempt <= fetchRetries; attempt++) {
-        console.info(`Fetch attempt ${attempt}/${fetchRetries}...`);
+      for (let attempt = 1; attempt <= FETCH_RETRIES; attempt++) {
+        console.info(`Fetch attempt ${attempt}/${FETCH_RETRIES}...`);
 
         messages = await groupChat.fetchMessages({ limit: DEFAULT_FETCH_LIMIT });
         filtered = messages.filter((msg) => {
@@ -183,13 +175,13 @@ async function main(): Promise<void> {
         console.info(`  Fetched ${messages.length} total messages, ${filtered.length} in time window`);
 
         // If we got a reasonable number of messages, we're done
-        if (filtered.length >= 20 || attempt === fetchRetries) {
+        if (filtered.length >= 20 || attempt === FETCH_RETRIES) {
           break;
         }
 
         // Otherwise wait and retry
-        console.info(`  Low message count, waiting ${retryDelay}s before retry...`);
-        await sleep(retryDelay);
+        console.info(`  Low message count, waiting ${RETRY_DELAY}s before retry...`);
+        await sleep(RETRY_DELAY);
       }
 
       filtered.sort((a, b) => a.timestamp - b.timestamp);
@@ -202,9 +194,9 @@ async function main(): Promise<void> {
         }
       }
 
-      fs.mkdirSync(outputDir, { recursive: true });
+      fs.mkdirSync(OUTPUT_DIR, { recursive: true });
       const filename = `logs_${targetDate.format('YYYY-MM-DD')}.txt`;
-      const outputPath = path.join(outputDir, filename);
+      const outputPath = path.join(OUTPUT_DIR, filename);
       fs.writeFileSync(outputPath, lines.join('\n'), 'utf-8');
 
       console.error(`Wrote ${lines.length} lines to ${outputPath}`);
