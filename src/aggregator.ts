@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { DaySummary, EventType, NapSession, ParsedEvent } from './types';
+import { DaySummary, DiaperChange, EventType, NapSession, ParsedEvent } from './types';
 
 // Night hours: 20:00 to 07:00
 const NIGHT_START_HOUR = 20;
@@ -205,6 +205,7 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
       feedings: [],
       naps: [],
       comments: [],
+      diaperChanges: [],
     };
 
     // Process feeding sessions for this date
@@ -377,12 +378,20 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     // Count diaper changes
     for (const event of dayEvents) {
       if (event.type === 'DIAPER_CHANGE') {
+        const diaperChange: DiaperChange = {
+          time: formatTime(parseTimestamp(event.timestamp)),
+          type: event.diaperChangeType!,
+          rawMessage: event.rawMessage,
+        };
+
+        summary.diaperChanges.push(diaperChange);
         summary.totalDiaperChanges++;
-        if (event.diaperChangeType === 'WET') {
+
+        if (diaperChange.type === 'WET') {
           summary.wetDiaperChanges++;
-        } else if (event.diaperChangeType === 'DIRTY') {
+        } else if (diaperChange.type === 'DIRTY') {
           summary.dirtyDiaperChanges++;
-        } else if (event.diaperChangeType === 'WET_AND_DIRTY') {
+        } else if (diaperChange.type === 'WET_AND_DIRTY') {
           summary.mixedDiaperChanges++;
         } else {
           // Unknown type - count as wet by default

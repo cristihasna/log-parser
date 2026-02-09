@@ -17,28 +17,6 @@ export interface ParsedEvent {
   diaperChangeType?: DiaperChangeType; // for DIAPER_CHANGE events
 }
 
-export interface RawLogEntry {
-  date: Date;
-  author: string;
-  message: string;
-}
-
-// Legacy - kept for backward compatibility during migration
-export interface LegacyParsedEvent {
-  timestamp: Date;
-  type: string;
-  rawMessage: string;
-  details?: string;
-  weight?: number;
-}
-
-export interface ParserState {
-  lastFeedWasStop: boolean;
-  lastSleepWasStop: boolean;
-}
-
-// Aggregated daily statistics types
-
 export interface FeedingSession {
   startTime: string; // HH:MM format
   endTime: string; // HH:MM format
@@ -52,6 +30,12 @@ export interface NapSession {
   durationMinutes: number;
   isNightSleep: boolean; // true if during night hours (19:00-07:00)
   rawMessages: string[]; // Original messages for start and stop events
+}
+
+export interface DiaperChange {
+  time: string; // HH:MM format
+  type: DiaperChangeType;
+  rawMessage: string; // Original message for the diaper change event
 }
 
 export interface Comment {
@@ -80,7 +64,6 @@ export interface DaySummary {
   feedings: FeedingSession[];
   naps: NapSession[];
   comments: Comment[]; // General comments/observations for the day
+  diaperChanges: DiaperChange[]; // List of diaper changes with time and type
   weight?: number; // grams (if mentioned during the day)
 }
-
-// Remove legacy ParsedEventJSON - use ParsedEvent instead
