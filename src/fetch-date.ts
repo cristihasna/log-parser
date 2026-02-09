@@ -2,10 +2,12 @@ import 'dotenv/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import dayjs, { Dayjs } from 'dayjs';
+import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import { Client, LocalAuth, Message, Chat } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 
+dayjs.extend(utc);
 dayjs.extend(timezone);
 
 const DEFAULT_FETCH_LIMIT = 500;
@@ -54,8 +56,9 @@ async function waitForSync(seconds: number): Promise<void> {
   console.info('Sync wait complete.');
 }
 
-function formatMessageLine(message: Message): string[] {
-  const sender = message.author || 'Unknown Sender';
+async function formatMessageLine(message: Message): Promise<string[]> {
+  const contact = await message.getContact();
+  const sender = contact.name || contact.pushname || 'Unknown Sender';
 
   const timestamp = dayjs.unix(message.timestamp).tz(TIMEZONE);
   const prefix = `${timestamp.format('DD/MM/YYYY, HH:mm')} - ${sender}: `;
@@ -139,7 +142,7 @@ async function main(): Promise<void> {
       console.info('Client is ready.');
 
       // Wait for chat history to sync
-      await waitForSync(SYNC_DELAY);
+      // await waitForSync(SYNC_DELAY);
 
       const chats = await client.getChats();
       const groupChat = chats.find((chat) => chat.isGroup && chat.name === GROUP_NAME);
