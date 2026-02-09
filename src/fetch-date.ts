@@ -98,8 +98,8 @@ async function main(): Promise<void> {
   const targetDate = parseDateArg(process.argv.slice(2));
   // Define fetch window: start at midnight of target date, end with overlap into next day
   const windowStart = targetDate.startOf('day').tz(TIMEZONE, true);
-  const windowEnd = targetDate.add(1, 'day').add(OVERLAP_HOURS_AFTER, 'hour').startOf('hour');
-  const now = dayjs();
+  const windowEnd = targetDate.add(1, 'day').add(OVERLAP_HOURS_AFTER, 'hour').startOf('hour').tz(TIMEZONE, true);
+  const now = dayjs().tz(TIMEZONE, true);
   const effectiveEnd = windowEnd.isAfter(now) ? now : windowEnd;
 
   console.error(`Fetching messages for group "${GROUP_NAME}"`);
@@ -172,7 +172,7 @@ async function main(): Promise<void> {
           if (msg.type !== 'chat') return false;
           if (!msg.body || !msg.body.trim()) return false;
           const msgDate = dayjs.unix(msg.timestamp);
-          return msgDate.valueOf() >= windowStart.valueOf() && msgDate.valueOf() <= effectiveEnd.valueOf();
+          return msgDate.isAfter(windowStart) && msgDate.isBefore(effectiveEnd);
         });
 
         console.info(`  Fetched ${messages.length} total messages, ${filtered.length} in time window`);
