@@ -97,7 +97,7 @@ function parseDateArg(args: string[]): Dayjs {
 async function main(): Promise<void> {
   const targetDate = parseDateArg(process.argv.slice(2));
   // Define fetch window: start at midnight of target date, end with overlap into next day
-  const windowStart = targetDate.startOf('day');
+  const windowStart = targetDate.startOf('day').tz(TIMEZONE, true);
   const windowEnd = targetDate.add(1, 'day').add(OVERLAP_HOURS_AFTER, 'hour').startOf('hour');
   const now = dayjs();
   const effectiveEnd = windowEnd.isAfter(now) ? now : windowEnd;
