@@ -41,6 +41,25 @@ function getDurationMinutes(start: Date, end: Date): number {
 }
 
 /**
+ * Build a dayjs datetime for a session time stored as HH:MM.
+ * If endTime is earlier than startTime, it means the session crossed midnight.
+ */
+function getSessionDateTime(
+  dateStr: string,
+  time: string,
+  startTime?: string,
+  mode: 'start' | 'end' = 'start',
+): dayjs.Dayjs {
+  let dateTime = dayjs(`${dateStr}T${time}`);
+
+  if (mode === 'end' && startTime && time < startTime) {
+    dateTime = dateTime.add(1, 'day');
+  }
+
+  return dateTime;
+}
+
+/**
  * Split a session that spans midnight or crosses night/day boundaries
  * Returns the minutes that fall within night time and day time
  */
@@ -332,7 +351,12 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
         const previousDayLastNightNap = previousDaySummary?.naps.filter((n) => n.isNightSleep).slice(-1)[0];
 
         const previousDayLastNightNapEnd = previousDayLastNightNap
-          ? dayjs(`${previousDateStr}T${previousDayLastNightNap.endTime}`)
+          ? getSessionDateTime(
+              previousDateStr,
+              previousDayLastNightNap.endTime,
+              previousDayLastNightNap.startTime,
+              'end',
+            )
           : dayjs(`${dateStr}T${morningSleepSessions[0].startTime}`);
 
         const lastMorningNapEnd = dayjs(`${dateStr}T${morningSleepSessions[morningSleepSessions.length - 1].endTime}`);

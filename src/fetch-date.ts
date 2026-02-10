@@ -22,6 +22,7 @@ const DEFAULT_TIMEZONE = 'Europe/Bucharest'; // Change if needed
 
 // Overlap window to capture sessions that cross into next day
 const OVERLAP_HOURS_AFTER = 8; // End fetching at 08:00 next day (covers long sleep sessions)
+const OVERLAP_HOURS_BEFORE = 3; // Start fetching 3 hours before midnight (covers late night sessions)
 
 const GROUP_NAME = process.env.WHATSAPP_GROUP_NAME || WHATSAPP_GROUP_NAME;
 
@@ -97,8 +98,8 @@ function parseDateArg(args: string[]): Dayjs {
 async function main(): Promise<void> {
   const targetDate = parseDateArg(process.argv.slice(2));
   // Define fetch window: start at midnight of target date, end with overlap into next day
-  const windowStart = targetDate.startOf('day').tz(TIMEZONE, true);
-  const windowEnd = targetDate.add(1, 'day').add(OVERLAP_HOURS_AFTER, 'hour').startOf('hour').tz(TIMEZONE, true);
+  const windowStart = targetDate.startOf('day').subtract(OVERLAP_HOURS_BEFORE, 'hour').tz(TIMEZONE, true);
+  const windowEnd = windowStart.add(1, 'day').add(OVERLAP_HOURS_BEFORE + OVERLAP_HOURS_AFTER, 'hour');
   const now = dayjs().tz(TIMEZONE, true);
   const effectiveEnd = windowEnd.isAfter(now) ? now : windowEnd;
 
