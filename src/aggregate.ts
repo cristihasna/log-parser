@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import dayjs from 'dayjs';
 import { aggregateByDay } from './aggregator';
 import { ParsedEvent } from './types';
 
@@ -13,18 +14,21 @@ Usage: npx ts-node src/aggregate.ts [input-file] [options]
 Options:
   --input, -i     Input JSON file with parsed events (default: parsed/parsed.json)
   --output, -o    Output file path (default: aggregated/aggregated.json)
+  --date, -d      Filter to a single date (YYYY-MM-DD) and output one object
   --help, -h      Show this help message
 
 Examples:
   npx ts-node src/aggregate.ts
   npx ts-node src/aggregate.ts parsed.json
   npx ts-node src/aggregate.ts -i parsed/parsed_week5.json -o aggregated/week5.json
+  npx ts-node src/aggregate.ts -i parsed/parsed_2026-02-08.json -o aggregated/aggregated_2026-02-08.json --date 2026-02-08
 `);
 }
 
-function parseArgs(args: string[]): { inputFile: string; outputFile: string } {
+function parseArgs(args: string[]): { inputFile: string; outputFile: string; date?: string } {
   let inputFile = path.join(DEFAULT_INPUT_DIR, 'parsed.json');
   let outputFile = path.join(DEFAULT_OUTPUT_DIR, 'aggregated.json');
+  let date: string | undefined;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -44,18 +48,29 @@ function parseArgs(args: string[]): { inputFile: string; outputFile: string } {
       continue;
     }
 
+    if (arg === '--date' || arg === '-d') {
+      const dateStr = args[++i];
+      const parsedDate = dayjs(dateStr, 'YYYY-MM-DD', true);
+      if (!parsedDate.isValid()) {
+        console.error(`Error: Invalid date: ${dateStr}`);
+        process.exit(1);
+      }
+      date = parsedDate.format('YYYY-MM-DD');
+      continue;
+    }
+
     // Positional argument: treat as input file
     if (!arg.startsWith('-')) {
       inputFile = arg;
     }
   }
 
-  return { inputFile, outputFile };
+  return { inputFile, outputFile, date };
 }
 
 function main(): void {
   const args = process.argv.slice(2);
-  const { inputFile, outputFile } = parseArgs(args);
+  const { inputFile, outputFile, date } = parseArgs(args);
 
   // Resolve input file path
   const resolvedInputPath = path.resolve(inputFile);
@@ -76,8 +91,19 @@ function main(): void {
 
   console.error(`Generated summaries for ${dailySummaries.length} days`);
 
+  const outputData = date
+    ? (() => {
+        const summary = dailySummaries.find((s) => s.date === date);
+        if (!summary) {
+          console.error(`Error: No summary found for date ${date}`);
+          process.exit(1);
+        }
+        return summary;
+      })()
+    : dailySummaries;
+
   // Format output
-  const output = JSON.stringify(dailySummaries, null, 2);
+  const output = JSON.stringify(outputData, null, 2);
 
   // Write output
   const resolvedOutputPath = path.resolve(outputFile);

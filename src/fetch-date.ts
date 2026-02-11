@@ -34,6 +34,7 @@ const SYNC_DELAY = getEnvNumber('SYNC_DELAY_SECONDS', DEFAULT_SYNC_DELAY_SECONDS
 const FETCH_RETRIES = getEnvNumber('FETCH_RETRIES', DEFAULT_FETCH_RETRIES);
 const RETRY_DELAY = getEnvNumber('RETRY_DELAY_SECONDS', DEFAULT_RETRY_DELAY_SECONDS);
 const TIMEZONE = process.env.TIMEZONE || DEFAULT_TIMEZONE;
+const FETCH_LIMIT = getEnvNumber('FETCH_LIMIT', DEFAULT_FETCH_LIMIT);
 
 function getEnvNumber(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -143,7 +144,7 @@ async function main(): Promise<void> {
       console.info('Client is ready.');
 
       // Wait for chat history to sync
-      // await waitForSync(SYNC_DELAY);
+      await waitForSync(SYNC_DELAY);
 
       const chats = await client.getChats();
       const groupChat = chats.find((chat) => chat.isGroup && chat.name === GROUP_NAME);
@@ -168,7 +169,7 @@ async function main(): Promise<void> {
       for (let attempt = 1; attempt <= FETCH_RETRIES; attempt++) {
         console.info(`Fetch attempt ${attempt}/${FETCH_RETRIES}...`);
 
-        messages = await groupChat.fetchMessages({ limit: DEFAULT_FETCH_LIMIT });
+        messages = await groupChat.fetchMessages({ limit: FETCH_LIMIT });
         filtered = messages.filter((msg) => {
           if (msg.type !== 'chat') return false;
           if (!msg.body || !msg.body.trim()) return false;

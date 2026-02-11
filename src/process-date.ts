@@ -11,7 +11,7 @@ Arguments:
   <date>          Date in YYYY-MM-DD format (defaults to yesterday)
 
 Options:
-  --fetch-only    Only fetch logs, don't parse or aggregate
+  --fetch-only    Only fetch logs, don't parse, aggregate, or post
   --parse-only    Only parse logs (assumes logs already fetched)
   --help, -h      Show this help message
 
@@ -23,6 +23,9 @@ Examples:
   npx tsx src/process-date.ts 2026-01-20
   # Just fetch logs for a date
   npx tsx src/process-date.ts 2026-01-20 --fetch-only
+
+  # Upload already aggregated logs for a date
+  npx tsx src/post-aggregated.ts 2026-01-20
 `);
 }
 
@@ -99,10 +102,20 @@ async function main(): Promise<void> {
   // Step 3: Aggregate
   console.log('📊 Aggregating daily summary...\n');
   try {
-    execSync(`npm run aggregate -- ${parsedFile} -o ${aggregatedFile}`, { stdio: 'inherit' });
+    execSync(`npm run aggregate -- ${parsedFile} -o ${aggregatedFile} --date ${dateStr}`, { stdio: 'inherit' });
     console.log('\n✅ Summary aggregated\n');
   } catch (error) {
     console.error(`❌ Failed to aggregate for ${dateStr}`);
+    throw error;
+  }
+
+  // Step 4: Post aggregated logs
+  console.log('📤 Posting aggregated logs...\n');
+  try {
+    execSync(`npm run post:daily -- ${dateStr}`, { stdio: 'inherit' });
+    console.log('\n✅ Aggregated logs posted\n');
+  } catch (error) {
+    console.error(`❌ Failed to post aggregated logs for ${dateStr}`);
     throw error;
   }
 
@@ -110,7 +123,8 @@ async function main(): Promise<void> {
   console.log('Output files:');
   console.log(`  - Logs: ${inputFile}`);
   console.log(`  - Parsed: ${parsedFile}`);
-  console.log(`  - Aggregated: ${aggregatedFile}\n`);
+  console.log(`  - Aggregated: ${aggregatedFile}`);
+  console.log('Remote upload: completed\n');
 }
 
 main().catch((error) => {

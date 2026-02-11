@@ -126,6 +126,7 @@ export interface ParsedEventJSON {
 - "schimbat pipi + caca", "schimbat pipi caca" → WET_AND_DIRTY
 - "schimbat pipi + pârț" → WET (pârț/gas is incidental)
 - "schimbat" without details → Use message timestamp, infer type from context if possible
+- **Note**:If no type can be inferred, default to WET_AND_DIRTY to avoid undercounting
 
 **WEIGHT**: Extract weight in grams from messages like:
 - "cantarit in saptamana10, 5540g"
