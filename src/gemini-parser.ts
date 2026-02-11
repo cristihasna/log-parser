@@ -2,6 +2,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { ParsedEvent } from './types';
 import { PARSING_PROMPT } from './prompt';
 
+const DEFAULT_MODEL = 'gemini-2.5-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_MODEL;
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -39,7 +42,7 @@ export async function parseWithGemini(logContent: string): Promise<ParsedEvent[]
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ 
-    model: 'gemini-2.5-flash',
+    model: GEMINI_MODEL,
     generationConfig: {
       responseMimeType: 'application/json',
     }
