@@ -119,6 +119,18 @@ async function main(): Promise<void> {
     throw error;
   }
 
+  // Step 5: Generate and send daily insights (non-blocking)
+  console.log('💡 Generating daily insights...\n');
+  try {
+    execSync(`npm run insights:daily -- ${dateStr}`, { stdio: 'inherit' });
+    console.log('\n✅ Daily insights generated and sent\n');
+  } catch (error) {
+    console.warn(`⚠️ Insights pipeline failed for ${dateStr}, continuing without blocking daily process.`);
+    if (error instanceof Error && error.message) {
+      console.warn(error.message);
+    }
+  }
+
   console.log(`\n🎉 Complete! Processed ${dateStr} successfully.\n`);
   console.log('Output files:');
   console.log(`  - Logs: ${inputFile}`);
