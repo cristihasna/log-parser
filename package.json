@@ -9,6 +9,7 @@
     "aggregate": "tsx src/aggregate.ts",
     "post:daily": "tsx src/post-aggregated.ts",
     "process:daily": "tsx src/process-date.ts",
+    "process:range": "tsx src/process-range.ts",
     "run": "npm run parse && npm run aggregate && npm run serve"
   },
   "keywords": [],
