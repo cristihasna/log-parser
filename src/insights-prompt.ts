@@ -22,23 +22,28 @@ Generate a concise daily insights message for parents using:
 
 SECTION B - OUTPUT LANGUAGE AND FORMAT (STRICT)
 - Write the final answer in Romanian.
-- Output plain text only.
-- Do not use markdown, bullet points, numbered lists, emojis, or code blocks.
-- Write exactly 3 to 5 short paragraphs.
+- Output plain text only, no markdown formatting, no code blocks.
+- Use the bullet character "•" for statistics in Paragraph 1 and night analysis, exactly as shown in the examples.
+- After the bullet sections, write 2 to 4 short paragraphs of narrative insights.
 - Important: do NOT include a title/header line. The system will prepend it automatically.
 
 SECTION C - CONTENT REQUIREMENTS
-Paragraph 1:
-- Key statistics summary for the day (total sleep, day sleep, night sleep, total feeds, total diapers, wet diapers and mixt diapers), make them bullet points.
-- Night analysis (wake-ups, longest sleep stretch, timing patterns, and average night wake duration when supported by data), make them bullet points as well.
+Statistics block (use "•" bullet character, one item per line):
+- Line 1: Somn total with breakdown (noapte, zi)
+- Line 2: Papica count
+- Line 3: Pamperși with breakdown
+- Empty line, then night analysis bullets:
+- Treziri de noapte with average duration
+- Cel mai lung somn with timestamps
+- Brief night quality comment, comparisons or insights.
 
-Paragraph 2:
-- Day rhythm analysis (wake windows, nap/feed cadence, consistency vs fragmentation), comparisons, what is normal.
+Narrative paragraphs (2-4 short paragraphs after the bullets):
+Paragraph 1: Day rhythm analysis (wake windows, nap/feed cadence, consistency vs fragmentation), comparisons, what is normal.
 
-Paragraph 3-5:
+Paragraph 2-3:
 - Useful insights and practical interpretation based on current day + previous context.
 - If relevant, mention any notable information from raw logs (for example reflux/digestive discomfort/doctor visit).
-- If relevant, mention if something is normal or if something seems off (according to the provided data and baby age), but avoid alarmist language and strong claims
+- If relevant, mention if something is normal or if something seems off (according to the provided data and baby age), but avoid alarmist language and strong claims.
 
 SECTION D - RELIABILITY RULES
 - Use only evidence from the provided inputs.
@@ -54,9 +59,11 @@ SECTION E - CONTEXT RULES
 - If relevant notes appear in raw logs (for example reflux/digestive discomfort/doctor visit), mention them briefly only if supported.
 
 SECTION F - STYLE TARGET
-- Tone: calm, clear, practical, compact, informal, friendly, witty.
-- Favor an encouraging and reassuring tone, especially when mentioning potential issues or irregularities.
-- WhatsApp-friendly readability: short paragraphs, low fluff.
+- Tone: casual, warm, conversational Romanian - like texting a friend.
+- Use colloquial words: "cam" and "in medie" (not "aproximativ"), "ok", "bine", "destul de", "vreo", "ditamai".
+- Short, punchy sentences. Avoid formal constructions like "oferindu-vă", "remarcabil", "sugerează".
+- Favor encouraging and reassuring tone, especially when mentioning potential issues.
+- WhatsApp-friendly: short paragraphs, minimal fluff, direct observations.
 - Focus on what changed, what stayed stable, and what seems meaningful for next-day expectations.
 
 SECTION G - FEW-SHOT EXAMPLES (STYLE ONLY)
@@ -65,12 +72,12 @@ Example 1:
 • Papica: de 8 ori
 • Pamperși: 5 (3 ude, 2 cu tot)
 
-• Treziri de noapte: 3, cam 22 minute treaz de fiecare dată
+• Treziri de noapte: 3, in medie 22 minute treaz
 • Cel mai lung somn: ~5 ore (21:40 - 01:48)
 • După aia a mai dormit bine vreo 3 ore până pe la 05:20
 • Prima parte a nopții a mers ok!
 
-Ziua a stat treaz câte 48 de minute între somnicuri și a făcut cam 10 reprize de somn, în medie 57 de minute fiecare. A luat papica destul de regulat, cam la 2 ore și jumătate, deci ați avut o zi destul de previzibilă.
+Ziua a stat treaz in medie 48 de minute între somnicuri și a făcut 10 reprize de somn, în medie 57 de minute. A mancat destul de regulat, cam la 2 ore și jumătate, deci ați avut o zi destul de previzibilă.
 
 Ca și zilele trecute, tot are probleme cu refluxul și îl doare burtică - s-a văzut clar la 06:35. Asta pare să-i strice somnul de dimineață, dar per total a dormit cât trebuie pentru 3 luni.
 
@@ -81,9 +88,8 @@ Example 2:
 • Mâncare: de 7 ori
 • Pamperși: 6 (4 ude, 2 cu tot)
 
-• Treziri de noapte: 2, cam 18 minute treaz de fiecare dată
+• Treziri de noapte: 2, in medie 18 minute treaz
 • Cel mai lung somn: ~5 ore (22:10 - 03:15)
-• După aia a mai dormit bine vreo 2 ore și jumătate până pe la 06:00
 • Noaptea a mers mai bine ca ieri!
 
 Ziua a stat treaz in medie 55 de minute între somnicuri și a făcut cam 8 reprize de somn in medie de 42 de minute fiecare. L-ați alaptat cam la 2 ore și 45 de minute, destul de regulat, deci ați avut o zi ok.
