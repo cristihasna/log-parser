@@ -12,8 +12,11 @@ Arguments:
   <end-date>      End date in YYYY-MM-DD format
 
 Options:
-  --fetch-only    Only fetch logs, don't parse, aggregate, or post
-  --parse-only    Only parse logs (assumes logs already fetched)
+  --fetch-only    Only fetch logs
+  --skip-fetch    Skip fetching logs (assume logs are already fetched)
+  --skip-parse    Skip parsing logs (assume logs are already fetched and parsed)
+  --skip-post     Skip posting aggregated logs to the API
+  --skip-insights Skip generating/sending daily insights
   --help, -h      Show this help message
 
 Examples:
@@ -23,8 +26,8 @@ Examples:
   # Just fetch logs for a range
   npx tsx src/process-range.ts 2026-02-01 2026-02-07 --fetch-only
 
-  # Process last 7 days
-  npx tsx src/process-range.ts 2026-02-01 2026-02-07
+  # Aggregate from parsed logs for a range, skipping insights
+  npx tsx src/process-range.ts 2026-02-01 2026-02-07 --skip-parse --skip-insights
 `);
 }
 
@@ -32,7 +35,10 @@ function parseArgs(args: string[]): {
   startDate: dayjs.Dayjs;
   endDate: dayjs.Dayjs;
   fetchOnly: boolean;
-  parseOnly: boolean;
+  skipFetch: boolean;
+  skipParse: boolean;
+  skipPost: boolean;
+  skipInsights: boolean;
 } {
   if (args.includes('--help') || args.includes('-h')) {
     printUsage();
@@ -41,6 +47,20 @@ function parseArgs(args: string[]): {
 
   const flags = args.filter((arg) => arg.startsWith('--'));
   const positionalArgs = args.filter((arg) => !arg.startsWith('--'));
+  const allowedFlags = new Set([
+    '--fetch-only',
+    '--skip-fetch',
+    '--skip-parse',
+    '--skip-post',
+    '--skip-insights',
+  ]);
+
+  const unknownFlags = flags.filter((flag) => !allowedFlags.has(flag));
+  if (unknownFlags.length > 0) {
+    console.error(`Error: Unknown option(s): ${unknownFlags.join(', ')}`);
+    printUsage();
+    process.exit(1);
+  }
 
   if (positionalArgs.length < 2) {
     console.error('Error: Both start-date and end-date are required');
@@ -69,13 +89,16 @@ function parseArgs(args: string[]): {
   }
 
   const fetchOnly = flags.includes('--fetch-only');
-  const parseOnly = flags.includes('--parse-only');
+  const skipFetch = flags.includes('--skip-fetch');
+  const skipParse = flags.includes('--skip-parse');
+  const skipPost = flags.includes('--skip-post');
+  const skipInsights = flags.includes('--skip-insights');
 
-  return { startDate, endDate, fetchOnly, parseOnly };
+  return { startDate, endDate, fetchOnly, skipFetch, skipParse, skipPost, skipInsights };
 }
 
 async function main(): Promise<void> {
-  const { startDate, endDate, fetchOnly, parseOnly } = parseArgs(process.argv.slice(2));
+  const { startDate, endDate, fetchOnly, skipFetch, skipParse, skipPost, skipInsights } = parseArgs(process.argv.slice(2));
 
   // Generate list of dates in range
   const dates: dayjs.Dayjs[] = [];
@@ -103,8 +126,18 @@ async function main(): Promise<void> {
       let command = `npx tsx src/process-date.ts ${dateStr}`;
       if (fetchOnly) {
         command += ' --fetch-only';
-      } else if (parseOnly) {
-        command += ' --parse-only';
+      }
+      if (skipFetch) {
+        command += ' --skip-fetch';
+      }
+      if (skipParse) {
+        command += ' --skip-parse';
+      }
+      if (skipPost) {
+        command += ' --skip-post';
+      }
+      if (skipInsights) {
+        command += ' --skip-insights';
       }
 
       execSync(command, { stdio: 'inherit' });

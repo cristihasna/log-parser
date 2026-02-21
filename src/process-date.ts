@@ -11,8 +11,11 @@ Arguments:
   <date>          Date in YYYY-MM-DD format (defaults to yesterday)
 
 Options:
-  --fetch-only    Only fetch logs, don't parse, aggregate, or post
-  --parse-only    Only parse logs (assumes logs already fetched)
+  --fetch-only    Only fetch logs, don't parse, aggregate, post, or generate insights
+  --skip-fetch    Skip fetching logs (assume logs are already fetched)
+  --skip-parse    Skip parsing logs (assume logs are already fetched and parsed)
+  --skip-post     Skip posting aggregated logs to the API
+  --skip-insights Skip generating/sending daily insights
   --help, -h      Show this help message
 
 Examples:
@@ -24,6 +27,9 @@ Examples:
   # Just fetch logs for a date
   npx tsx src/process-date.ts 2026-01-20 --fetch-only
 
+  # Aggregate already parsed logs, post to API, but skip insights
+  npx tsx src/process-date.ts 2026-01-20 --skip-parse --skip-insights
+
   # Upload already aggregated logs for a date
   npx tsx src/post-aggregated.ts 2026-01-20
 `);
@@ -32,7 +38,10 @@ Examples:
 function parseArgs(args: string[]): {
   date: dayjs.Dayjs;
   fetchOnly: boolean;
-  parseOnly: boolean;
+  skipFetch: boolean;
+  skipParse: boolean;
+  skipPost: boolean;
+  skipInsights: boolean;
 } {
   if (args.includes('--help') || args.includes('-h')) {
     printUsage();
@@ -41,6 +50,26 @@ function parseArgs(args: string[]): {
 
   const flags = args.filter(arg => arg.startsWith('--'));
   const positionalArgs = args.filter(arg => !arg.startsWith('--'));
+  const allowedFlags = new Set([
+    '--fetch-only',
+    '--skip-fetch',
+    '--skip-parse',
+    '--skip-post',
+    '--skip-insights',
+  ]);
+
+  const unknownFlags = flags.filter((flag) => !allowedFlags.has(flag));
+  if (unknownFlags.length > 0) {
+    console.error(`Error: Unknown option(s): ${unknownFlags.join(', ')}`);
+    printUsage();
+    process.exit(1);
+  }
+
+  if (positionalArgs.length > 1) {
+    console.error('Error: Too many positional arguments');
+    printUsage();
+    process.exit(1);
+  }
 
   // Default to yesterday if no date provided
   let date: dayjs.Dayjs;
@@ -57,23 +86,32 @@ function parseArgs(args: string[]): {
   }
 
   const fetchOnly = flags.includes('--fetch-only');
-  const parseOnly = flags.includes('--parse-only');
+  const skipFetch = flags.includes('--skip-fetch');
+  const skipParse = flags.includes('--skip-parse');
+  const skipPost = flags.includes('--skip-post');
+  const skipInsights = flags.includes('--skip-insights');
 
-  return { date, fetchOnly, parseOnly };
+  if (fetchOnly && (skipFetch || skipParse)) {
+    console.error('Error: --fetch-only cannot be combined with --skip-fetch or --skip-parse');
+    process.exit(1);
+  }
+
+  return { date, fetchOnly, skipFetch, skipParse, skipPost, skipInsights };
 }
 
 async function main(): Promise<void> {
-  const { date, fetchOnly, parseOnly } = parseArgs(process.argv.slice(2));
+  const { date, fetchOnly, skipFetch, skipParse, skipPost, skipInsights } = parseArgs(process.argv.slice(2));
 
   const dateStr = date.format('YYYY-MM-DD');
   const inputFile = `logs/logs_${dateStr}.txt`;
   const parsedFile = `parsed/parsed_${dateStr}.json`;
   const aggregatedFile = `aggregated/aggregated_${dateStr}.json`;
+  const shouldSkipFetch = skipFetch || skipParse;
 
   console.log(`\n=== Processing ${dateStr} ===\n`);
 
   // Step 1: Fetch logs
-  if (!parseOnly) {
+  if (!shouldSkipFetch) {
     console.log('📥 Fetching logs...\n');
     try {
       execSync(`npm run fetch:daily -- ${dateStr}`, { stdio: 'inherit' });
@@ -82,6 +120,8 @@ async function main(): Promise<void> {
       console.error(`❌ Failed to fetch logs for ${dateStr}`);
       throw error;
     }
+  } else {
+    console.log('⏭️ Skipping fetch step (--skip-fetch/--skip-parse)\n');
   }
 
   if (fetchOnly) {
@@ -90,13 +130,17 @@ async function main(): Promise<void> {
   }
 
   // Step 2: Parse logs
-  console.log('🧠 Parsing logs...\n');
-  try {
-    execSync(`npm run parse -- ${inputFile} -o ${parsedFile}`, { stdio: 'inherit' });
-    console.log('\n✅ Logs parsed\n');
-  } catch (error) {
-    console.error(`❌ Failed to parse logs for ${dateStr}`);
-    throw error;
+  if (!skipParse) {
+    console.log('🧠 Parsing logs...\n');
+    try {
+      execSync(`npm run parse -- ${inputFile} -o ${parsedFile}`, { stdio: 'inherit' });
+      console.log('\n✅ Logs parsed\n');
+    } catch (error) {
+      console.error(`❌ Failed to parse logs for ${dateStr}`);
+      throw error;
+    }
+  } else {
+    console.log('⏭️ Skipping parse step (--skip-parse)\n');
   }
 
   // Step 3: Aggregate
@@ -110,25 +154,33 @@ async function main(): Promise<void> {
   }
 
   // Step 4: Post aggregated logs
-  console.log('📤 Posting aggregated logs...\n');
-  try {
-    execSync(`npm run post:daily -- ${dateStr}`, { stdio: 'inherit' });
-    console.log('\n✅ Aggregated logs posted\n');
-  } catch (error) {
-    console.error(`❌ Failed to post aggregated logs for ${dateStr}`);
-    throw error;
+  if (!skipPost) {
+    console.log('📤 Posting aggregated logs...\n');
+    try {
+      execSync(`npm run post:daily -- ${dateStr}`, { stdio: 'inherit' });
+      console.log('\n✅ Aggregated logs posted\n');
+    } catch (error) {
+      console.error(`❌ Failed to post aggregated logs for ${dateStr}`);
+      throw error;
+    }
+  } else {
+    console.log('⏭️ Skipping post step (--skip-post)\n');
   }
 
   // Step 5: Generate and send daily insights (non-blocking)
-  console.log('💡 Generating daily insights...\n');
-  try {
-    execSync(`npm run insights:daily -- ${dateStr}`, { stdio: 'inherit' });
-    console.log('\n✅ Daily insights generated and sent\n');
-  } catch (error) {
-    console.warn(`⚠️ Insights pipeline failed for ${dateStr}, continuing without blocking daily process.`);
-    if (error instanceof Error && error.message) {
-      console.warn(error.message);
+  if (!skipInsights) {
+    console.log('💡 Generating daily insights...\n');
+    try {
+      execSync(`npm run insights:daily -- ${dateStr}`, { stdio: 'inherit' });
+      console.log('\n✅ Daily insights generated and sent\n');
+    } catch (error) {
+      console.warn(`⚠️ Insights pipeline failed for ${dateStr}, continuing without blocking daily process.`);
+      if (error instanceof Error && error.message) {
+        console.warn(error.message);
+      }
     }
+  } else {
+    console.log('⏭️ Skipping insights step (--skip-insights)\n');
   }
 
   console.log(`\n🎉 Complete! Processed ${dateStr} successfully.\n`);
@@ -136,7 +188,7 @@ async function main(): Promise<void> {
   console.log(`  - Logs: ${inputFile}`);
   console.log(`  - Parsed: ${parsedFile}`);
   console.log(`  - Aggregated: ${aggregatedFile}`);
-  console.log('Remote upload: completed\n');
+  console.log(`Remote upload: ${skipPost ? 'skipped' : 'completed'}\n`);
 }
 
 main().catch((error) => {

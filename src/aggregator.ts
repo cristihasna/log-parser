@@ -1,12 +1,12 @@
 import dayjs from 'dayjs';
 import { DaySummary, DiaperChange, EventType, NapSession, ParsedEvent } from './types';
 
-// Night hours: 20:00 to 07:00
-const NIGHT_START_HOUR = 20;
-const NIGHT_END_HOUR = 7;
+// Night hours: 21:00 to 08:00
+const NIGHT_START_HOUR = process.env.NIGHT_START_HOUR ? parseInt(process.env.NIGHT_START_HOUR, 10) : 21;
+const NIGHT_END_HOUR = process.env.NIGHT_END_HOUR ? parseInt(process.env.NIGHT_END_HOUR, 10) : 8;
 
 /**
- * Check if a given hour is during night time (20:00-07:00)
+ * Check if a given hour is during night time
  */
 function isNightTime(hour: number): boolean {
   return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
@@ -266,47 +266,97 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     // Process sleep sessions for this date
     let daySleepSessions: NapSession[] = [];
     let nightSleepSessions: NapSession[] = [];
+    let morningSleepSessions: NapSession[] = [];
+    let eveningSleepSessions: NapSession[] = [];
+
+    const endOfPreviousNight = dayjs(dateStr).hour(NIGHT_END_HOUR).startOf('hour');
+    const startOfNextNight = dayjs(dateStr).hour(NIGHT_START_HOUR).startOf('hour');
 
     for (const session of sleepSessions) {
       const startDate = parseTimestamp(session.start.timestamp);
       const sessionDateStr = getSessionDate(startDate);
 
-      if (sessionDateStr === dateStr && session.end) {
-        const endDate = parseTimestamp(session.end.timestamp);
-        const duration = getDurationMinutes(startDate, endDate);
+      if (sessionDateStr !== dateStr || !session.end) {
+        continue;
+      }
 
-        // Skip invalid durations
-        if (duration > 0 && duration < 720) {
-          // Max 12 hours for a sleep
-          const { nightMinutes, dayMinutes } = splitSessionByNightDay(startDate, endDate);
-          const isNightSleep = nightMinutes > dayMinutes;
+      const endDate = parseTimestamp(session.end.timestamp);
+      const duration = getDurationMinutes(startDate, endDate);
 
-          const rawMessages = [session.start.rawMessage];
-          if (session.end) {
-            rawMessages.push(session.end.rawMessage);
-          }
-          const napSession: NapSession = {
-            startTime: formatTime(startDate),
-            endTime: formatTime(endDate),
-            durationMinutes: duration,
-            isNightSleep,
-            rawMessages,
-          };
+      // Skip invalid durations
+      if (duration <= 0 || duration >= 720) {
+        continue;
+      }
 
-          summary.naps.push(napSession);
-          summary.totalSleepTime += duration;
-          summary.napSessions++;
+      // Max 12 hours for a sleep
+      // const { nightMinutes, dayMinutes } = splitSessionByNightDay(startDate, endDate);
+      // is night sleep if it starts in the night interval, and awake time since previous sleep is less than half of the sleep duration
+      // (to avoid classifying long naps that start in the morning as night sleep)
+      const isNightSleep = isNightTime(startDate.getHours());
 
-          if (isNightSleep) {
-            summary.totalNightSleepTime += duration;
-            nightSleepSessions.push(napSession);
-          } else {
-            summary.totalDaySleepTime += duration;
-            daySleepSessions.push(napSession);
-          }
-        }
+      const rawMessages = [session.start.rawMessage];
+      if (session.end) {
+        rawMessages.push(session.end.rawMessage);
+      }
+      const napSession: NapSession = {
+        startTime: formatTime(startDate),
+        endTime: formatTime(endDate),
+        durationMinutes: duration,
+        isNightSleep,
+        rawMessages,
+      };
+
+      summary.naps.push(napSession);
+      summary.totalSleepTime += duration;
+      summary.napSessions++;
+
+      if (isNightSleep && dayjs(startDate).isBefore(endOfPreviousNight)) {
+        morningSleepSessions.push(napSession);
+      } else if (isNightSleep && dayjs(startDate).isAfter(startOfNextNight)) {
+        eveningSleepSessions.push(napSession);
+      } else {
+        daySleepSessions.push(napSession);
       }
     }
+
+    // check if last mornign sleep can actually be considered night sleep based on the time since previous night's last nap
+    if (morningSleepSessions.length >= 2) {
+      const lastMorningNap = morningSleepSessions.at(-1)!;
+      const previousMorningSleepEnd = morningSleepSessions.at(-2)!;
+      const timeSincePreviousNap = dayjs(`${dateStr}T${lastMorningNap.startTime}`).diff(
+        dayjs(`${dateStr}T${previousMorningSleepEnd.endTime}`),
+        'minute',
+      );
+
+      if (timeSincePreviousNap > lastMorningNap.durationMinutes / 2) {
+        // reclassify as day sleep
+        daySleepSessions.push(...morningSleepSessions);
+        morningSleepSessions.pop();
+      }
+    }
+
+    // check if first evening sleep can actually be considered night sleep based on the time untill the next evening nap
+    if (eveningSleepSessions.length >= 2) {
+      const firstEveningNap = eveningSleepSessions[0];
+      const nextEveningNap = eveningSleepSessions[1];
+      const timeUntilNextNap = dayjs(`${dateStr}T${nextEveningNap.startTime}`).diff(
+        dayjs(`${dateStr}T${firstEveningNap.endTime}`),
+        'minute',
+      );
+
+      if (timeUntilNextNap > firstEveningNap.durationMinutes / 2) {
+        // reclassify as day sleep
+        daySleepSessions.push(firstEveningNap);
+        eveningSleepSessions.shift();
+      }
+    }
+
+    nightSleepSessions = [...morningSleepSessions, ...eveningSleepSessions];
+    summary.totalDaySleepTime = daySleepSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+    summary.totalNightSleepTime = nightSleepSessions.reduce((sum, s) => sum + s.durationMinutes, 0);
+
+    // Store the night wake-up count in the summary
+    summary.totalNightWakeUps = countNightWakeUps(sortedEvents, dateStr);
 
     // Calculate averages
     if (daySleepSessions.length > 0) {
@@ -321,8 +371,16 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     }
 
     if (daySleepSessions.length > 0) {
-      const dayTimeStart = dayjs(dateStr).hour(NIGHT_END_HOUR).startOf('hour');
-      const dayEndTime = dayjs(dateStr).hour(NIGHT_START_HOUR).startOf('hour');
+      // day time starts at the end of the last morning nap if it exists, otherwise at the night end hour
+      const dayTimeStart =
+        morningSleepSessions.length > 0
+          ? getSessionDateTime(dateStr, morningSleepSessions.at(-1)!.endTime)
+          : dayjs(dateStr).hour(NIGHT_END_HOUR).startOf('hour');
+      const dayEndTime =
+        eveningSleepSessions.length > 0
+          ? getSessionDateTime(dateStr, eveningSleepSessions[0].startTime)
+          : dayjs(dateStr).hour(NIGHT_START_HOUR).startOf('hour');
+
       const totalDayTime = dayEndTime.diff(dayTimeStart, 'minute');
       const totalTimeInBetweenDayNaps = totalDayTime - summary.totalDaySleepTime;
       summary.averageDayWakeDuration = Math.round(
@@ -331,16 +389,6 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     }
 
     if (nightSleepSessions.length > 0) {
-      const endOfPreviousNight = dayjs(dateStr).hour(NIGHT_END_HOUR).startOf('hour');
-      const startOfNextNight = dayjs(dateStr).hour(NIGHT_START_HOUR).startOf('hour');
-
-      const morningSleepSessions = nightSleepSessions.filter((s) =>
-        dayjs(`${dateStr}T${s.startTime}`).isBefore(endOfPreviousNight),
-      );
-      const eveningSleepSessions = nightSleepSessions.filter((s) =>
-        dayjs(`${dateStr}T${s.startTime}`).isAfter(startOfNextNight),
-      );
-
       let totalNightWakeTime = 0;
 
       if (morningSleepSessions.length > 0) {
@@ -389,15 +437,10 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
         }
       }
 
-      // Use the actual night wake-up count from STOP_SLEEP events
-      const nightWakeUps = countNightWakeUps(sortedEvents, dateStr);
-      if (nightWakeUps > 0 && totalNightWakeTime > 0) {
-        summary.averageNightWakeDuration = Math.round(totalNightWakeTime / nightWakeUps);
+      if (summary.totalNightWakeUps > 0 && totalNightWakeTime > 0) {
+        summary.averageNightWakeDuration = Math.round(totalNightWakeTime / summary.totalNightWakeUps);
       }
     }
-
-    // Store the night wake-up count in the summary
-    summary.totalNightWakeUps = countNightWakeUps(sortedEvents, dateStr);
 
     // Count diaper changes
     for (const event of dayEvents) {
