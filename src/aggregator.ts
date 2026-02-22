@@ -328,9 +328,10 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
         'minute',
       );
 
-      if (timeSincePreviousNap > lastMorningNap.durationMinutes / 2) {
+      if (timeSincePreviousNap > lastMorningNap.durationMinutes / 2 && lastMorningNap.durationMinutes >= 30) {
         // reclassify as day sleep
-        daySleepSessions.push(...morningSleepSessions);
+        lastMorningNap.isNightSleep = false;
+        daySleepSessions.push(lastMorningNap);
         morningSleepSessions.pop();
       }
     }
@@ -346,6 +347,7 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
 
       if (timeUntilNextNap > firstEveningNap.durationMinutes / 2) {
         // reclassify as day sleep
+        firstEveningNap.isNightSleep = false;
         daySleepSessions.push(firstEveningNap);
         eveningSleepSessions.shift();
       }
