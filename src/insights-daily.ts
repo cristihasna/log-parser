@@ -7,7 +7,7 @@ import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import customParseFormat from 'dayjs/plugin/customParseFormat';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Chat, Client, LocalAuth, Message } from 'whatsapp-web.js';
+import { Chat, Client, LocalAuth } from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import { buildInsightsPrompt } from './insights-prompt';
 
@@ -22,6 +22,8 @@ const DEFAULT_AUTH_DIR = '.wwebjs_auth';
 const DEFAULT_TIMEZONE = 'Europe/Bucharest';
 const DEFAULT_MODEL = 'gemini-2.5-flash';
 const DEFAULT_SYNC_DELAY_SECONDS = 30;
+const DEFAULT_PREVIOUS_CONTEXT_DAYS = 5;
+const DEFAULT_WHATSAPP_INSIGHTS_FETCH_LIMIT = 100;
 const CLIENT_ID = 'log-parser';
 const INSIGHTS_HEADER_PREFIX = 'Daily insights -';
 
@@ -31,16 +33,25 @@ const INSIGHTS_OUTPUT_DIR = process.env.INSIGHTS_OUTPUT_DIR || DEFAULT_INSIGHTS_
 const LOGS_DIR = process.env.WHATSAPP_OUTPUT_DIR || DEFAULT_LOGS_DIR;
 const AGGREGATED_DIR = process.env.AGGREGATED_OUTPUT_DIR || DEFAULT_AGGREGATED_DIR;
 const SYNC_DELAY = getEnvNumber('SYNC_DELAY_SECONDS', DEFAULT_SYNC_DELAY_SECONDS);
-const FETCH_LIMIT = 5;
+const FETCH_LIMIT = getEnvNumber('WHATSAPP_INSIGHTS_FETCH_LIMIT', DEFAULT_WHATSAPP_INSIGHTS_FETCH_LIMIT);
 const HEADLESS_ENV = process.env.WHATSAPP_HEADLESS;
 const CHROME_PATH = process.env.CHROME_PATH || process.env.PUPPETEER_EXECUTABLE_PATH;
 const INSIGHTS_GROUP_NAME = process.env.WHATSAPP_INSIGHTS_GROUP_NAME;
 const GEMINI_MODEL = process.env.GEMINI_INSIGHTS_MODEL || process.env.GEMINI_MODEL || DEFAULT_MODEL;
 
-type PreviousContextSource = 'insight_file' | 'whatsapp_message' | 'previous_raw_logs' | 'none';
+type AtomicPreviousContextSource = 'insight_file' | 'whatsapp_message' | 'previous_raw_logs' | 'none';
+type PreviousContextSource = AtomicPreviousContextSource | 'mixed';
 
 interface PreviousContextResult {
   source: PreviousContextSource;
+  content: string;
+  requestedDays: number;
+  includedDays: number;
+}
+
+interface PreviousContextChunk {
+  date: Dayjs;
+  source: Exclude<AtomicPreviousContextSource, 'none'>;
   content: string;
 }
 
@@ -48,6 +59,13 @@ interface BabyAge {
   months: number;
   weeks: number;
   days: number;
+}
+
+interface ParsedArgs {
+  targetDate: Dayjs;
+  storeOnly: boolean;
+  preferLocal: boolean;
+  previousContextDays: number;
 }
 
 function getEnvNumber(name: string, fallback: number): number {
@@ -67,6 +85,7 @@ Arguments:
 Options:
   --store-only    Generate and store insights locally, skip WhatsApp operations
   --prefer-local  Reuse local insights file if it already exists for the date
+  --previous-days Number of previous days to include in context (default: 5)
   --help, -h      Show this help message
 
 Environment:
@@ -74,23 +93,80 @@ Environment:
   WHATSAPP_INSIGHTS_GROUP_NAME   Required only when sending to WhatsApp.
   BIRTHDATE                      Required when generating new insights.
   GEMINI_INSIGHTS_MODEL          Optional. Insights model override.
+  PREVIOUS_CONTEXT_DAYS          Optional. Default: 5
+  WHATSAPP_INSIGHTS_FETCH_LIMIT  Optional. Default: 100
   INSIGHTS_OUTPUT_DIR            Optional. Default: ./insights
 `);
 }
 
-function parseArgs(args: string[]): { targetDate: Dayjs; storeOnly: boolean; preferLocal: boolean } {
+function parsePositiveIntegerArg(optionName: string, rawValue: string): number {
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`Error: Invalid ${optionName} value "${rawValue}". Expected a positive integer.`);
+    process.exit(1);
+  }
+
+  return parsed;
+}
+
+function parseArgs(args: string[]): ParsedArgs {
   if (args.includes('--help') || args.includes('-h')) {
     printUsage();
     process.exit(0);
   }
 
-  const storeOnly = args.includes('--store-only');
-  const preferLocal = args.includes('--prefer-local');
-  const positionalArgs = args.filter((arg) => !arg.startsWith('--'));
+  let storeOnly = false;
+  let preferLocal = false;
+  let previousContextDays = getEnvNumber('PREVIOUS_CONTEXT_DAYS', DEFAULT_PREVIOUS_CONTEXT_DAYS);
+  const positionalArgs: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === '--store-only') {
+      storeOnly = true;
+      continue;
+    }
+
+    if (arg === '--prefer-local') {
+      preferLocal = true;
+      continue;
+    }
+
+    if (arg === '--previous-days') {
+      const value = args[i + 1];
+      if (!value || value.startsWith('--')) {
+        console.error('Error: Missing value for --previous-days');
+        process.exit(1);
+      }
+      previousContextDays = parsePositiveIntegerArg('--previous-days', value);
+      i += 1;
+      continue;
+    }
+
+    if (arg.startsWith('--previous-days=')) {
+      const value = arg.slice('--previous-days='.length);
+      previousContextDays = parsePositiveIntegerArg('--previous-days', value);
+      continue;
+    }
+
+    if (arg.startsWith('--')) {
+      console.error(`Error: Unknown option: ${arg}`);
+      process.exit(1);
+    }
+
+    positionalArgs.push(arg);
+  }
+
+  if (positionalArgs.length > 1) {
+    console.error(`Error: Too many positional arguments: ${positionalArgs.join(' ')}`);
+    process.exit(1);
+  }
+
   if (positionalArgs.length === 0) {
     const defaultDate = dayjs().tz(TIMEZONE).subtract(1, 'day').startOf('day');
     console.log(`No date provided, defaulting to yesterday: ${defaultDate.format('YYYY-MM-DD')}`);
-    return { targetDate: defaultDate, storeOnly, preferLocal };
+    return { targetDate: defaultDate, storeOnly, preferLocal, previousContextDays };
   }
 
   const dateStr = positionalArgs[0];
@@ -100,7 +176,7 @@ function parseArgs(args: string[]): { targetDate: Dayjs; storeOnly: boolean; pre
     process.exit(1);
   }
 
-  return { targetDate: date.startOf('day'), storeOnly, preferLocal };
+  return { targetDate: date.startOf('day'), storeOnly, preferLocal, previousContextDays };
 }
 
 function sleep(seconds: number): Promise<void> {
@@ -166,6 +242,31 @@ function formatDateRo(date: Dayjs): string {
   const months = ['ian.', 'feb.', 'mar.', 'apr.', 'mai', 'iun.', 'iul.', 'aug.', 'sept.', 'oct.', 'nov.', 'dec.'];
   const month = months[date.month()] ?? '';
   return `${date.date()} ${month} ${date.year()}`;
+}
+
+function getInsightsHeader(date: Dayjs): string {
+  return `${INSIGHTS_HEADER_PREFIX} ${formatDateRo(date)}`;
+}
+
+function readNonEmptyFile(filePath: string): string | null {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  const content = fs.readFileSync(filePath, 'utf-8').trim();
+  if (!content) {
+    return null;
+  }
+
+  return content;
+}
+
+function formatPreviousContext(chunks: PreviousContextChunk[]): string {
+  return chunks
+    .map((chunk) => {
+      return [`Date: ${chunk.date.format('YYYY-MM-DD')}`, `Source: ${chunk.source}`, chunk.content].join('\n');
+    })
+    .join('\n\n---\n\n');
 }
 
 function computeBabyAge(targetDate: Dayjs): BabyAge {
@@ -263,52 +364,99 @@ async function findGroupChat(client: Client, groupName: string): Promise<Chat> {
   return groupChat;
 }
 
-async function getLatestWhatsAppInsights(groupChat: Chat): Promise<string | null> {
-  const messages = await groupChat.fetchMessages({ limit: FETCH_LIMIT });
-  const insightMessages = messages
-    .filter((message: Message) => {
-      if (message.type !== 'chat') return false;
-      if (!message.body || !message.body.trim()) return false;
-      return message.body.trim().startsWith(INSIGHTS_HEADER_PREFIX);
-    })
-    .sort((a, b) => b.timestamp - a.timestamp);
-
-  if (insightMessages.length === 0) {
-    return null;
+async function getWhatsAppInsightsByHeader(
+  groupChat: Chat,
+  targetHeaders: string[],
+  fetchLimit: number,
+): Promise<Map<string, string>> {
+  const remainingHeaders = new Set(targetHeaders);
+  if (remainingHeaders.size === 0) {
+    return new Map();
   }
 
-  return insightMessages[0].body.trim();
+  const messages = await groupChat.fetchMessages({ limit: fetchLimit });
+  const sortedMessages = [...messages].sort((a, b) => b.timestamp - a.timestamp);
+  const insightsByHeader = new Map<string, string>();
+
+  for (const message of sortedMessages) {
+    if (message.type !== 'chat') continue;
+    if (!message.body || !message.body.trim()) continue;
+
+    const body = message.body.trim();
+    for (const header of remainingHeaders) {
+      if (!body.startsWith(header)) continue;
+
+      insightsByHeader.set(header, body);
+      remainingHeaders.delete(header);
+      break;
+    }
+
+    if (remainingHeaders.size === 0) {
+      break;
+    }
+  }
+
+  return insightsByHeader;
 }
 
-async function loadPreviousContext(targetDate: Dayjs, groupChat?: Chat): Promise<PreviousContextResult> {
-  const previousDate = targetDate.subtract(1, 'day');
+async function loadPreviousContext(targetDate: Dayjs, previousDays: number, groupChat?: Chat): Promise<PreviousContextResult> {
+  const previousDates = Array.from({ length: previousDays }, (_, index) => targetDate.subtract(index + 1, 'day'));
+  const headers = previousDates.map((date) => getInsightsHeader(date));
+  const whatsappInsightsByHeader = groupChat
+    ? await getWhatsAppInsightsByHeader(groupChat, headers, Math.max(FETCH_LIMIT, previousDays * 20))
+    : new Map<string, string>();
 
-  const previousInsightsPath = getInsightsFilePath(previousDate);
-  if (fs.existsSync(previousInsightsPath)) {
-    const content = fs.readFileSync(previousInsightsPath, 'utf-8').trim();
-    if (content.length > 0) {
-      return { source: 'insight_file', content };
+  const chunks: PreviousContextChunk[] = [];
+  for (const previousDate of previousDates) {
+    const previousInsightsPath = getInsightsFilePath(previousDate);
+    const previousInsights = readNonEmptyFile(previousInsightsPath);
+    if (previousInsights) {
+      chunks.push({
+        date: previousDate,
+        source: 'insight_file',
+        content: previousInsights,
+      });
+      continue;
+    }
+
+    const whatsappHeader = getInsightsHeader(previousDate);
+    const whatsappInsights = whatsappInsightsByHeader.get(whatsappHeader);
+    if (whatsappInsights) {
+      chunks.push({
+        date: previousDate,
+        source: 'whatsapp_message',
+        content: whatsappInsights,
+      });
+      continue;
+    }
+
+    const previousRawLogsPath = getRawLogsPath(previousDate);
+    const previousRawLogs = readNonEmptyFile(previousRawLogsPath);
+    if (previousRawLogs) {
+      chunks.push({
+        date: previousDate,
+        source: 'previous_raw_logs',
+        content: previousRawLogs,
+      });
     }
   }
 
-  if (groupChat) {
-    const latestWhatsappInsights = await getLatestWhatsAppInsights(groupChat);
-    if (latestWhatsappInsights) {
-      return { source: 'whatsapp_message', content: latestWhatsappInsights };
-    }
+  if (chunks.length === 0) {
+    return {
+      source: 'none',
+      content: 'no previous insights available (first request)',
+      requestedDays: previousDays,
+      includedDays: 0,
+    };
   }
 
-  const previousRawLogsPath = getRawLogsPath(previousDate);
-  if (fs.existsSync(previousRawLogsPath)) {
-    const content = fs.readFileSync(previousRawLogsPath, 'utf-8').trim();
-    if (content.length > 0) {
-      return { source: 'previous_raw_logs', content };
-    }
-  }
-
+  const uniqueSources = new Set(chunks.map((chunk) => chunk.source));
+  const source: PreviousContextSource = uniqueSources.size === 1 ? chunks[0].source : 'mixed';
   return {
-    source: 'none',
-    content: 'no previous insights available (first request)',
+    source,
+    content: formatPreviousContext(chunks),
+    requestedDays: previousDays,
+    includedDays: chunks.length,
   };
 }
 
@@ -401,12 +549,16 @@ async function generateAndStoreInsights(input: InsightsGenerationInput): Promise
     ageWeeks: input.age.weeks,
     ageDays: input.age.days,
     previousContextSource: input.previousContext.source,
+    previousContextRequestedDays: input.previousContext.requestedDays,
+    previousContextIncludedDays: input.previousContext.includedDays,
     previousContext: input.previousContext.content,
     aggregatedJson: input.aggregatedJson,
     rawLogs: input.rawLogs,
   });
 
-  console.log(`Previous context source: ${input.previousContext.source}`);
+  console.log(
+    `Previous context source: ${input.previousContext.source} (${input.previousContext.includedDays}/${input.previousContext.requestedDays} days included)`,
+  );
   console.log(`Generating insights with Gemini model: ${GEMINI_MODEL}...`);
 
   let insightsText = await generateInsights(prompt);
@@ -434,7 +586,7 @@ function getExistingLocalInsights(date: Dayjs): string | null {
 }
 
 async function main(): Promise<void> {
-  const { targetDate, storeOnly, preferLocal } = parseArgs(process.argv.slice(2));
+  const { targetDate, storeOnly, preferLocal, previousContextDays } = parseArgs(process.argv.slice(2));
   const dateStr = targetDate.format('YYYY-MM-DD');
 
   if (!storeOnly && !INSIGHTS_GROUP_NAME) {
@@ -485,6 +637,7 @@ async function main(): Promise<void> {
   console.log(`Raw logs: ${path.resolve(rawLogsPath)}`);
   console.log(`Aggregated: ${path.resolve(aggregatedPath)}`);
   console.log(`Output: ${insightsOutputPath}`);
+  console.log(`Previous context days requested: ${previousContextDays}`);
   if (storeOnly) {
     console.log('Mode: store-only (skipping WhatsApp)\n');
   } else if (preferLocal) {
@@ -495,7 +648,7 @@ async function main(): Promise<void> {
   }
 
   if (storeOnly) {
-    const previousContext = await loadPreviousContext(targetDate);
+    const previousContext = await loadPreviousContext(targetDate, previousContextDays);
     await generateAndStoreInsights({
       targetDate,
       age,
@@ -512,7 +665,7 @@ async function main(): Promise<void> {
     const insightsGroup = await findGroupChat(client, INSIGHTS_GROUP_NAME!);
     console.log(`Found group "${INSIGHTS_GROUP_NAME}".`);
 
-    const previousContext = await loadPreviousContext(targetDate, insightsGroup);
+    const previousContext = await loadPreviousContext(targetDate, previousContextDays, insightsGroup);
     const insightsText = await generateAndStoreInsights({
       targetDate,
       age,

@@ -4,7 +4,9 @@ export interface InsightsPromptInput {
   ageMonths: number;
   ageWeeks: number;
   ageDays: number;
-  previousContextSource: 'insight_file' | 'whatsapp_message' | 'previous_raw_logs' | 'none';
+  previousContextSource: 'insight_file' | 'whatsapp_message' | 'previous_raw_logs' | 'none' | 'mixed';
+  previousContextRequestedDays: number;
+  previousContextIncludedDays: number;
   previousContext: string;
   aggregatedJson: string;
   rawLogs: string;
@@ -15,16 +17,16 @@ export function buildInsightsPrompt(input: InsightsPromptInput): string {
 
 SECTION A - GOAL
 Generate a concise daily insights message for parents using:
-1) current-day raw logs,
-2) current-day aggregated JSON,
-3) previous-day context,
+1) target-day (yesterday) raw logs, up until this morning,
+2) target-day (yesterday) aggregated JSON,
+3) previous-days context,
 4) baby age context.
 
 SECTION B - OUTPUT LANGUAGE AND FORMAT (STRICT)
 - Write the final answer in Romanian.
 - Output plain text only, no markdown formatting, no code blocks.
 - Use the bullet character "•" for statistics in Paragraph 1 and night analysis, exactly as shown in the examples.
-- After the bullet sections, write 2 to 4 short paragraphs of narrative insights.
+- After the bullet sections, write 3 to 5 short-to-medium paragraphs of narrative insights.
 - Important: do NOT include a title/header line. The system will prepend it automatically.
 
 SECTION C - CONTENT REQUIREMENTS
@@ -37,13 +39,16 @@ Statistics block (use "•" bullet character, one item per line):
 - Cel mai lung somn with timestamps
 - Brief night quality comment, comparisons or insights.
 
-Narrative paragraphs (2-4 short paragraphs after the bullets):
-Paragraph 1: Day rhythm analysis (wake windows, nap/feed cadence, consistency vs fragmentation), comparisons, what is normal.
+Narrative paragraphs (3-5 short-to-medium paragraphs after the bullets):
+Paragraph 1: "Ieri..." day rhythm analysis (wake windows, nap/feed cadence, consistency vs fragmentation), comparisons, what is normal.
 
-Paragraph 2-3:
-- Useful insights and practical interpretation based on current day + previous context.
+Paragraph 2-4:
+- Useful insights and practical interpretation based on yesterday data + previous context.
 - If relevant, mention any notable information from raw logs (for example reflux/digestive discomfort/doctor visit).
 - If relevant, mention if something is normal or if something seems off (according to the provided data and baby age), but avoid alarmist language and strong claims.
+- Compare with the previous days context and call out meaningful absences (something that usually happened but did not happen now) and unusual appearances (something new/out of pattern), if it applies.
+- If something deserves attention based on multi-day context, mention it calmly and concretely.
+- Final paragraph must have practical focus points for today (what to watch, what to repeat, what to adjust gently).
 
 SECTION D - RELIABILITY RULES
 - Use only evidence from the provided inputs.
@@ -55,9 +60,11 @@ SECTION D - RELIABILITY RULES
 SECTION E - CONTEXT RULES
 - Baby age at target date: ${input.ageMonths} months, ${input.ageWeeks} weeks, ${input.ageDays} days.
 - Previous context source: ${input.previousContextSource}.
+- Previous context coverage: included previous ${input.previousContextIncludedDays} day(s).
 - If previous context source is "none", explicitly mention this is the first comparable insights message.
 - If relevant notes appear in raw logs (for example reflux/digestive discomfort/doctor visit), mention them briefly only if supported.
-
+- If target-day aggregated JSON or raw logs include events that are from previous days, do not use them in the analysis or insights.
+- Important for night metrics: for "Cel mai lung somn", only consider sessions that started during the target day, and ignore those that started before midnight of the target day, even if they continued into the target day.
 SECTION F - STYLE TARGET
 - Tone: casual, warm, conversational Romanian - like texting a friend.
 - Use colloquial words: "cam" and "in medie" (not "aproximativ"), "ok", "bine", "destul de", "vreo", "ditamai".
@@ -109,16 +116,16 @@ Previous context:
 ${input.previousContext}
 \`\`\`
 
-Current day aggregated JSON:
+Target-day (yesterday) aggregated JSON:
 \`\`\`json
 ${input.aggregatedJson}
 \`\`\`
 
-Current day raw logs:
+Target-day (yesterday) raw logs:
 \`\`\`
 ${input.rawLogs}
 \`\`\`
 
 FINAL INSTRUCTION
-Produce only the final Romanian message body (3-5 short paragraphs), respecting all constraints above.`;
+Produce only the final Romanian message body, respecting all constraints above.`;
 }
