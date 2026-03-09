@@ -364,72 +364,12 @@ async function findGroupChat(client: Client, groupName: string): Promise<Chat> {
   return groupChat;
 }
 
-async function getWhatsAppInsightsByHeader(
-  groupChat: Chat,
-  targetHeaders: string[],
-  fetchLimit: number,
-): Promise<Map<string, string>> {
-  const remainingHeaders = new Set(targetHeaders);
-  if (remainingHeaders.size === 0) {
-    return new Map();
-  }
-
-  const messages = await groupChat.fetchMessages({ limit: fetchLimit });
-  const sortedMessages = [...messages].sort((a, b) => b.timestamp - a.timestamp);
-  const insightsByHeader = new Map<string, string>();
-
-  for (const message of sortedMessages) {
-    if (message.type !== 'chat') continue;
-    if (!message.body || !message.body.trim()) continue;
-
-    const body = message.body.trim();
-    for (const header of remainingHeaders) {
-      if (!body.startsWith(header)) continue;
-
-      insightsByHeader.set(header, body);
-      remainingHeaders.delete(header);
-      break;
-    }
-
-    if (remainingHeaders.size === 0) {
-      break;
-    }
-  }
-
-  return insightsByHeader;
-}
-
-async function loadPreviousContext(targetDate: Dayjs, previousDays: number, groupChat?: Chat): Promise<PreviousContextResult> {
+async function loadPreviousContext(targetDate: Dayjs, previousDays: number): Promise<PreviousContextResult> {
   const previousDates = Array.from({ length: previousDays }, (_, index) => targetDate.subtract(index + 1, 'day'));
-  const headers = previousDates.map((date) => getInsightsHeader(date));
-  const whatsappInsightsByHeader = groupChat
-    ? await getWhatsAppInsightsByHeader(groupChat, headers, Math.max(FETCH_LIMIT, previousDays * 20))
-    : new Map<string, string>();
 
   const chunks: PreviousContextChunk[] = [];
+
   for (const previousDate of previousDates) {
-    const previousInsightsPath = getInsightsFilePath(previousDate);
-    const previousInsights = readNonEmptyFile(previousInsightsPath);
-    if (previousInsights) {
-      chunks.push({
-        date: previousDate,
-        source: 'insight_file',
-        content: previousInsights,
-      });
-      continue;
-    }
-
-    const whatsappHeader = getInsightsHeader(previousDate);
-    const whatsappInsights = whatsappInsightsByHeader.get(whatsappHeader);
-    if (whatsappInsights) {
-      chunks.push({
-        date: previousDate,
-        source: 'whatsapp_message',
-        content: whatsappInsights,
-      });
-      continue;
-    }
-
     const previousRawLogsPath = getRawLogsPath(previousDate);
     const previousRawLogs = readNonEmptyFile(previousRawLogsPath);
     if (previousRawLogs) {
@@ -437,6 +377,16 @@ async function loadPreviousContext(targetDate: Dayjs, previousDays: number, grou
         date: previousDate,
         source: 'previous_raw_logs',
         content: previousRawLogs,
+      });
+    }
+
+    const previousInsightsPath = getInsightsFilePath(previousDate);
+    const previousInsights = readNonEmptyFile(previousInsightsPath);
+    if (previousInsights) {
+      chunks.push({
+        date: previousDate,
+        source: 'insight_file',
+        content: previousInsights,
       });
     }
   }
@@ -665,7 +615,7 @@ async function main(): Promise<void> {
     const insightsGroup = await findGroupChat(client, INSIGHTS_GROUP_NAME!);
     console.log(`Found group "${INSIGHTS_GROUP_NAME}".`);
 
-    const previousContext = await loadPreviousContext(targetDate, previousContextDays, insightsGroup);
+    const previousContext = await loadPreviousContext(targetDate, previousContextDays);
     const insightsText = await generateAndStoreInsights({
       targetDate,
       age,

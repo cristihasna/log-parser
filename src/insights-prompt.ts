@@ -17,7 +17,7 @@ export function buildInsightsPrompt(input: InsightsPromptInput): string {
 
 SECTION A - GOAL
 Generate a concise daily insights message for parents using:
-1) target-day (yesterday) raw logs, up until this morning,
+1) target-day (yesterday) raw logs,
 2) target-day (yesterday) aggregated JSON,
 3) previous-days context,
 4) baby age context.
@@ -54,7 +54,7 @@ SECTION D - RELIABILITY RULES
 - Use only evidence from the provided inputs.
 - Do not invent values, times, or trends.
 - If data is missing or uncertain, avoid strong claims.
-- No medical diagnosis or treatment recommendations.
+- No medical diagnosis or treatment recommendations. But you can mention if something seems to be a common issue for babies of at this age.
 - Prefer concrete timestamps when they strengthen the insight.
 
 SECTION E - CONTEXT RULES
@@ -63,8 +63,9 @@ SECTION E - CONTEXT RULES
 - Previous context coverage: included previous ${input.previousContextIncludedDays} day(s).
 - If previous context source is "none", explicitly mention this is the first comparable insights message.
 - If relevant notes appear in raw logs (for example reflux/digestive discomfort/doctor visit), mention them briefly only if supported.
-- If target-day aggregated JSON or raw logs include events that are from previous days, do not use them in the analysis or insights.
-- Important for night metrics: for "Cel mai lung somn", only consider sessions that started during the target day, and ignore those that started before midnight of the target day, even if they continued into the target day.
+- Important: for target date metrics only consider events that started during the target day (yesterday), and ignore those that started after 23:59, or before 00:00 of the target day. For target day insights, you can and should consider previous days context as needed.
+- If previous context source includes previous insights messages, try to not make it repetitive.
+
 SECTION F - STYLE TARGET
 - Tone: casual, warm, conversational Romanian - like texting a friend.
 - Use colloquial words: "cam" and "in medie" (not "aproximativ"), "ok", "bine", "destul de", "vreo", "ditamai".
