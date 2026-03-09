@@ -21,7 +21,6 @@ interface CompletedSleepSession extends CompletedSession {
   isNightSleep: boolean;
 }
 
-
 function isNightTime(hour: number): boolean {
   return hour >= NIGHT_START_HOUR || hour < NIGHT_END_HOUR;
 }
@@ -184,7 +183,6 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
 
   const feedingSessions = buildFeedingSessions(feedingMatches);
   const sleepSessions = buildSleepSessions(sleepMatches);
-  const nightSleepSessions = sleepSessions.filter((session) => session.isNightSleep);
 
   const eventsByDate = groupEventsByDate(sortedEvents);
 
@@ -275,6 +273,13 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     const currentDaySleepSessions = sleepSessions.filter((session) =>
       overlapsWindow(session.start, session.end, dayStart, dayEnd),
     );
+
+    if (
+      currentDaySleepSessions.length &&
+      overlapsWindow(currentDaySleepSessions.at(0)!.start, currentDaySleepSessions.at(0)!.end, dayStart, dayEnd)
+    ) {
+      currentDaySleepSessions.at(0)!.isNightSleep = true;
+    }
 
     const morningSleepSessions = currentDaySleepSessions.filter((session) =>
       overlapsWindow(session.start, session.end, dayStart, morningBoundary),
