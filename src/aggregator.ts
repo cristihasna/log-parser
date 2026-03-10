@@ -170,6 +170,18 @@ function buildSleepSessions(matches: SessionMatch[]): CompletedSleepSession[] {
   return sessions.sort((a, b) => a.start.getTime() - b.start.getTime());
 }
 
+const areSleepSessionsCoupled = (a: CompletedSleepSession, b: CompletedSleepSession): boolean => {
+  if (a.durationMinutes < 20) {
+    return false;
+  }
+
+  const wakeDuration = getDurationMinutes(a.end, b.start);
+  if (wakeDuration > Math.min(a.durationMinutes * 0.7, 30)) {
+    return false;
+  }
+  return true;
+};
+
 /**
  * Aggregate parsed events into daily summaries
  */
@@ -276,9 +288,33 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
 
     if (
       currentDaySleepSessions.length &&
-      overlapsWindow(currentDaySleepSessions.at(0)!.start, currentDaySleepSessions.at(0)!.end, dayStart, dayEnd)
+      overlapsWindow(
+        currentDaySleepSessions.at(0)!.start,
+        currentDaySleepSessions.at(0)!.end,
+        dayStart.subtract(1, 'day'),
+        dayEnd.subtract(1, 'day'),
+      )
     ) {
       currentDaySleepSessions.at(0)!.isNightSleep = true;
+    }
+
+    if (
+      currentDaySleepSessions.length &&
+      (overlapsWindow(
+        currentDaySleepSessions.at(-1)!.start,
+        currentDaySleepSessions.at(-1)!.end,
+        dayStart.add(1, 'day'),
+        dayEnd.add(1, 'day'),
+      ) ||
+        getOverlapMinutes(
+          currentDaySleepSessions.at(-1)!.start,
+          currentDaySleepSessions.at(-1)!.end,
+          eveningBoundary,
+          dayEnd,
+        ) >=
+          currentDaySleepSessions.at(-1)!.durationMinutes * 0.7)
+    ) {
+      currentDaySleepSessions.at(-1)!.isNightSleep = true;
     }
 
     const morningSleepSessions = currentDaySleepSessions.filter((session) =>
@@ -324,35 +360,16 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     }
 
     // check if last day sleep can actually be considered a day sleep or the day has already ended
-    if (daytimeSleepSessions.length > 1) {
+    while (
+      daytimeSleepSessions.length > 1 &&
+      eveningSleepSessions.length &&
+      areSleepSessionsCoupled(daytimeSleepSessions.at(-1)!, eveningSleepSessions.at(0)!)
+    ) {
       const lastDaySession = daytimeSleepSessions.at(-1)!;
-      const firstEveningSession = eveningSleepSessions.length && eveningSleepSessions.at(0);
-      const sleepDuringDayMinutes = getOverlapMinutes(
-        lastDaySession.start,
-        lastDaySession.end,
-        dayStart,
-        eveningBoundary,
-      );
-      const sleepDuringNightMinutes = getOverlapMinutes(
-        lastDaySession.start,
-        lastDaySession.end,
-        eveningBoundary,
-        dayEnd,
-      );
 
-      const isDurationUntilFirstEveningSessionShort = firstEveningSession
-        ? getDurationMinutes(lastDaySession.end, firstEveningSession.start) < lastDaySession.durationMinutes * 0.8
-        : true;
-
-      if (
-        lastDaySession.durationMinutes >= 20 &&
-        sleepDuringDayMinutes < sleepDuringNightMinutes &&
-        isDurationUntilFirstEveningSessionShort
-      ) {
-        lastDaySession.isNightSleep = true;
-        eveningSleepSessions.unshift(lastDaySession);
-        daytimeSleepSessions.pop();
-      }
+      lastDaySession.isNightSleep = true;
+      eveningSleepSessions.unshift(lastDaySession);
+      daytimeSleepSessions.pop();
     }
 
     // check if first evening sleep session can actually be considered a night sleep session or day has not ended yet
