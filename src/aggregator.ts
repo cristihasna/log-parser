@@ -1,4 +1,4 @@
-import dayjs, { Dayjs } from 'dayjs';
+import dayjs, { ConfigType, Dayjs } from 'dayjs';
 import { DaySummary, DiaperChange, EventType, ParsedEvent } from './types';
 
 // Night hours: 21:00 to 08:00
@@ -37,7 +37,7 @@ function getDateString(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function getDurationMinutes(start: dayjs.ConfigType, end: dayjs.ConfigType): number {
+function getDurationMinutes(start: ConfigType, end: ConfigType): number {
   return dayjs(end).diff(dayjs(start), 'minute', false);
 }
 
@@ -49,23 +49,18 @@ function minDayjs(a: Dayjs, b: Dayjs): Dayjs {
   return a.isBefore(b) ? a : b;
 }
 
-function overlapsWindow(start: dayjs.ConfigType, end: dayjs.ConfigType, windowStart: Dayjs, windowEnd: Dayjs): boolean {
+function overlapsWindow(start: ConfigType, end: ConfigType, windowStart: Dayjs, windowEnd: Dayjs): boolean {
   return dayjs(start).isBefore(windowEnd) && dayjs(end).isAfter(windowStart);
 }
 
-function startsDuringWindow(timestamp: dayjs.ConfigType, windowStart: Dayjs, windowEnd: Dayjs): boolean {
+function startsDuringWindow(timestamp: ConfigType, windowStart: Dayjs, windowEnd: Dayjs): boolean {
   return (
     dayjs(timestamp).isSame(windowStart) ||
     (dayjs(timestamp).isAfter(windowStart) && dayjs(timestamp).isBefore(windowEnd))
   );
 }
 
-function getOverlapMinutes(
-  start: dayjs.ConfigType,
-  end: dayjs.ConfigType,
-  windowStart: Dayjs,
-  windowEnd: Dayjs,
-): number {
+function getOverlapMinutes(start: ConfigType, end: ConfigType, windowStart: Dayjs, windowEnd: Dayjs): number {
   const overlapStart = maxDayjs(dayjs(start), windowStart);
   const overlapEnd = minDayjs(dayjs(end), windowEnd);
 
@@ -179,6 +174,26 @@ const areSleepSessionsCoupled = (a: CompletedSleepSession, b: CompletedSleepSess
   if (wakeDuration > Math.min(a.durationMinutes * 0.7, 30)) {
     return false;
   }
+  return true;
+};
+
+const isLikelyNightBoundarySession = (
+  session: CompletedSleepSession,
+  dayStart: Dayjs,
+  eveningBoundary: Dayjs,
+  dayEnd: Dayjs,
+): boolean => {
+  if (session.durationMinutes < 20) {
+    return false;
+  }
+
+  const sleepBeforeNightMinutes = getOverlapMinutes(session.start, session.end, dayStart, eveningBoundary);
+  const sleepAfterNightMinutes = getOverlapMinutes(session.start, session.end, eveningBoundary, dayEnd);
+
+  if (sleepAfterNightMinutes <= sleepBeforeNightMinutes) {
+    return false;
+  }
+
   return true;
 };
 
@@ -377,13 +392,13 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
       const firstEveningSession = eveningSleepSessions.at(0)!;
       const secondEveningSession = eveningSleepSessions.at(1)!;
 
-      const sleepDuringNightMinutes = getOverlapMinutes(
+      const sleepBeforeNightMinutes = getOverlapMinutes(
         firstEveningSession.start,
         firstEveningSession.end,
         dayStart,
         eveningBoundary,
       );
-      const sleepDuringDayMinutes = getOverlapMinutes(
+      const sleepAfterNightMinutes = getOverlapMinutes(
         firstEveningSession.start,
         firstEveningSession.end,
         eveningBoundary,
@@ -392,7 +407,7 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
 
       if (
         firstEveningSession.durationMinutes >= 20 &&
-        sleepDuringDayMinutes <= sleepDuringNightMinutes &&
+        sleepAfterNightMinutes <= sleepBeforeNightMinutes &&
         getDurationMinutes(firstEveningSession.end, secondEveningSession.start) >=
           firstEveningSession.durationMinutes * 0.8
       ) {
@@ -400,6 +415,18 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
         // add at beginning of daytime sessions to preserve chronological order
         daytimeSleepSessions.push(firstEveningSession);
         eveningSleepSessions.shift();
+      }
+    }
+
+    if (!eveningSleepSessions.length && daytimeSleepSessions.length) {
+      const lastDaySession = daytimeSleepSessions.at(-1)!;
+      const previousSleepSession =
+        daytimeSleepSessions.length > 1 ? daytimeSleepSessions.at(-2)! : (morningSleepSessions.at(-1) ?? null);
+
+      if (isLikelyNightBoundarySession(lastDaySession, dayStart, eveningBoundary, dayEnd)) {
+        lastDaySession.isNightSleep = true;
+        eveningSleepSessions.unshift(lastDaySession);
+        daytimeSleepSessions.pop();
       }
     }
 

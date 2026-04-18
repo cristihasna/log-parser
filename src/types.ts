@@ -28,7 +28,7 @@ export interface NapSession {
   start: string; // ISO local datetime: YYYY-MM-DDTHH:mm:ss
   end: string; // ISO local datetime: YYYY-MM-DDTHH:mm:ss
   durationMinutes: number;
-  isNightSleep: boolean; // true if during night hours (19:00-07:00)
+  isNightSleep: boolean; // true if classified as night sleep using the configured night window and boundary heuristics
   rawMessages: string[]; // Original messages for start and stop events
 }
 
@@ -60,7 +60,7 @@ export interface DaySummary {
   averageNightSleepDuration: number; // minutes per sleep segment during night
   averageInBetweenFeedsDuration: number; // minutes between feeding sessions
   feedingSessions: number;
-  totalNightWakeUps: number; // wake-ups between 19:00-07:00
+  totalNightWakeUps: number; // wake-ups between sessions classified as night sleep
   feedings: FeedingSession[];
   naps: NapSession[];
   comments: Comment[]; // General comments/observations for the day

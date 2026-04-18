@@ -7,6 +7,7 @@
     "fetch:daily": "tsx src/fetch-date.ts",
     "parse": "tsx src/parse.ts",
     "aggregate": "tsx src/aggregate.ts",
+    "test": "node --localstorage-file=/tmp/log-parser-jest-localstorage ./node_modules/jest/bin/jest.js --runInBand",
     "post:daily": "tsx src/post-aggregated.ts",
     "insights:daily": "tsx src/insights-daily.ts",
     "process:daily": "tsx src/process-date.ts",
@@ -17,8 +18,11 @@
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@types/jest": "^29.5.14",
     "@types/node": "^20.10.0",
     "@types/qrcode-terminal": "^0.12.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "tsx": "^4.21.0",
     "typescript": "^5.3.2"
   },
