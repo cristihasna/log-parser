@@ -35,6 +35,8 @@ describe('aggregateByDay boundary heuristics', () => {
   test('matches the corrected frozen fixture for the late final sleep regression', () => {
     const summary = getSummary(lateFinalNightFixture.events, lateFinalNightFixture.date);
     const lastNap = summary.naps.at(-1);
+    const dayNaps = summary.naps.filter((nap) => !nap.isNightSleep);
+    const longestDayNap = Math.max(...dayNaps.map((nap) => nap.durationMinutes));
 
     expect(lastNap).toBeDefined();
     expect(lastNap?.start).toBe('2026-04-17T19:18:00');
@@ -42,6 +44,9 @@ describe('aggregateByDay boundary heuristics', () => {
     expect(summary.totalNightSleepTime24h).toBe(623);
     expect(summary.totalDaySleepTime).toBe(269);
     expect(summary.napSessions).toBe(6);
+    expect(summary.averageDaySleepDuration).toBe(67);
+    expect(summary.averageNightSleepDuration).toBe(222);
+    expect(summary.averageDaySleepDuration).toBeLessThanOrEqual(longestDayNap);
   });
 
   test('keeps the existing coupled evening sleep promotion behavior', () => {

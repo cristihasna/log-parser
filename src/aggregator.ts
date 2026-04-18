@@ -500,8 +500,8 @@ export function aggregateByDay(events: ParsedEvent[]): DaySummary[] {
     );
 
     summary.averageDaySleepDuration = Math.round(
-      currentDaySleepSessions.reduce((total, session) => total + session.durationMinutes, 0) /
-        (currentDaySleepSessions.length || 1),
+      daytimeSleepSessions.reduce((total, session) => total + session.durationMinutes, 0) /
+        (daytimeSleepSessions.length || 1),
     );
 
     summary.averageNightSleepDuration = Math.round(
